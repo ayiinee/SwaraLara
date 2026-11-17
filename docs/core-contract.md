@@ -38,6 +38,13 @@ Receipt M2 harus mengikat recordingId, index, objectHash, committedAtServer.
 Implementasi M2 wajib menambah snapshot policy/perangkat/anggota sah dan validasi receipt terhadap indeks core,
 lalu menambah outbox dengan migration Room teruji. Receipt tidak boleh menghapus file atau DEK.
 
+Fixture handoff [fixtures/synthetic-segments-v1.json](fixtures/synthetic-segments-v1.json) berisi dua objek
+SWL1 dari PCM nol sintetis (11 frame total), hash, previousHash, ukuran dan base64 bytes.
+DEK dibuang sesudah pembuatan; tidak ada key/share di fixture. Header/hash/chain diperiksa lintas Kotlin–Node.
+Fixture ini untuk parser/validasi objek backend, **bukan rekaman yang boleh didaftarkan pada cloud**:
+`cloudUploadAllowed=false`, policy demo, tanpa manifest/signature/member snapshot.
+Ia tidak membuktikan otorisasi API, upload nyata, atau verifikasi GCM oleh server.
+
 Error recorder minimum: MIC_PERMISSION, SERVICE_START_FAILED, FOREGROUND_PERMISSION,
 STORAGE_WRITE_FAILED, CAPTURE_FAILED, SERVICE_INTERRUPTED. Kegagalan sensitif tidak diteruskan sebagai stacktrace.
 LOCAL_STORAGE_UNAVAILABLE menandakan inisialisasi/recovery lokal gagal; NO_AUDIO_CAPTURED menandai stop tanpa frame aman.

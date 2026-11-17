@@ -1,0 +1,18 @@
+{
+  "schema":"swl-core-upload-fixture-v1",
+  "description":"Synthetic zero PCM encrypted in memory; DEK discarded. Parser/hash fixture only.",
+  "cloudUploadAllowed":false,
+  "formatVersion":1,
+  "recordingId":"00112233-4455-6677-8899-aabbccddeeff",
+  "policyCode":"demo_2of3",
+  "sampleRate":16000,
+  "channels":1,
+  "pcmEncoding":"pcm16le",
+  "finalCaptureState":"sealed",
+  "totalSampleFrames":11,
+  "signedManifest":null,
+  "segments":[
+    {"index":0,"sampleCount":8,"byteLength":114,"objectSha256":"3025212ea6dd00d3d828bf3e7240f4956c695af2f42401538056c3f1873e5690","previousSha256":"0000000000000000000000000000000000000000000000000000000000000000","objectBase64":"U1dMMQARIjNEVWZ3iJmqu8zd7v8AAAAAAAA+gAEBAAAACPVEZ+uNhDe2AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIDQaxPQ5oP5noswrM08a7iaro9cVxpO5sEvVCspbKwao"},
+    {"index":1,"sampleCount":3,"byteLength":104,"objectSha256":"fde26465df7e8c864d63de75be204d6b57e51923008020c2ba3aefc446d7f413","previousSha256":"3025212ea6dd00d3d828bf3e7240f4956c695af2f42401538056c3f1873e5690","objectBase64":"U1dMMQARIjNEVWZ3iJmqu8zd7v8AAAABAAA+gAEBAAAAA/VEZ+uNhDe2AAAAATAlIS6m3QDT2Ci/PnJA9JVsaVry9CQBU4BWw/GHPlaQAAAAFoIvM+px3ZJCNPg4ubuTRSYwCKQwVyY="}
+  ]
+}
