@@ -26,6 +26,9 @@ class RecordingService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == STOP) {
             stopping.set(true)
+            if (core.recorder.state.value.busy) {
+                core.localRecorder.publish(core.recorder.state.value.copy(capture = CaptureState.STOPPING))
+            }
             try { audio?.stop() } catch (_: IllegalStateException) { }
             if (job == null) { core.localRecorder.publish(core.recorder.state.value.copy(capture = CaptureState.INTERRUPTED)); stopSelf() }
             return START_NOT_STICKY
@@ -37,7 +40,7 @@ class RecordingService : Service() {
             val stop = PendingIntent.getService(this,0,Intent(this,RecordingService::class.java).setAction(STOP),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             val notification = NotificationCompat.Builder(this,CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentTitle("SwaraLara — mikrofon aktif")
+                .setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentTitle("SwaraLara — layanan perekaman")
                 .setContentText("Perekaman lokal sedang disiapkan / berlangsung")
                 .setOngoing(true).addAction(0,"Hentikan",stop).build()
             ServiceCompat.startForeground(this,41,notification,
@@ -83,7 +86,8 @@ class RecordingService : Service() {
                 recorder.startRecording()
                 check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) { "MIC_START" }
                 core.localVault.capture(id,CaptureState.RECORDING)
-                core.localRecorder.publish(RecorderState(CaptureState.RECORDING,id,sampleRate = rate))
+                core.localRecorder.publish(RecorderState(if (stopping.get()) CaptureState.STOPPING else CaptureState.RECORDING,
+                    id,sampleRate = rate))
             }
             var emptyReads = 0
             while (!stopping.get()) {
@@ -98,7 +102,8 @@ class RecordingService : Service() {
             }
             core.localRecorder.publish(core.recorder.state.value.copy(capture = CaptureState.STOPPING))
             segmenter.finish()
-            finalState = CaptureState.SEALED
+            finalState = if (count > 0) CaptureState.SEALED else CaptureState.INTERRUPTED
+            if (count == 0) error = "NO_AUDIO_CAPTURED"
         } catch (e: CancellationException) { finalState = CaptureState.INTERRUPTED; error = "SERVICE_INTERRUPTED" }
         catch (_: SecurityException) { error = "MIC_PERMISSION" }
         catch (_: IOException) { error = "STORAGE_WRITE_FAILED" }

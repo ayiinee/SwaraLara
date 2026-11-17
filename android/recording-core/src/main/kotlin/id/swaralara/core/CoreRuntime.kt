@@ -23,6 +23,8 @@ class CoreRuntime private constructor(context: Context) {
     val recorder: RecorderController = localRecorder
     val vault: SecureVault = localVault
     val playback: SecurePlaybackController = LocalPlayback(localVault,scope,ready) { !localRecorder.state.value.busy }
+    /** Host Activity onStop: release playback buffers/resources; the recording service keeps ownership of capture. */
+    fun onHostBackgrounded() { scope.launch { playback.release() } }
     companion object {
         @Volatile private var instance: CoreRuntime? = null
         fun get(context: Context): CoreRuntime = instance ?: synchronized(this) {
@@ -38,7 +40,9 @@ internal class LocalRecorder(private val app: Context, private val core: CoreRun
     internal fun publish(state: RecorderState) { mutable.value = state }
     internal fun fail(code: String) { mutable.value = mutable.value.copy(capture = CaptureState.FAILED,errorCode = code) }
     override suspend fun start(config: CaptureConfig): UUID = mutex.withLock {
-        core.ready.await()
+        try { core.ready.await() }
+        catch (e: CancellationException) { throw e }
+        catch (e: Exception) { fail("LOCAL_STORAGE_UNAVAILABLE"); throw e }
         check(!mutable.value.busy) { "RECORDER_BUSY" }
         check(core.playback.state.value.phase !in setOf(PlaybackPhase.PLAYING,PlaybackPhase.PAUSED)) { "PLAYBACK_BUSY" }
         if (ContextCompat.checkSelfPermission(app,Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {

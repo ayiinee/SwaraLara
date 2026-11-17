@@ -19,6 +19,10 @@ import java.util.Date
 import java.util.UUID
 
 class MainActivity : ComponentActivity() {
+    override fun onStop() {
+        CoreRuntime.get(applicationContext).onHostBackgrounded()
+        super.onStop()
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val core = CoreRuntime.get(applicationContext)

@@ -22,6 +22,8 @@ sesudah state RECORDING. `stop()` menunggu state terminal. Start kedua saat busy
 `RecordingSummary` memisahkan capture/sync/recovery/integrity, tanpa judul/kronologi bebas.
 `prepare(id)` memverifikasi seluruh paket lokal sebelum player siap; audio tiap segmen diautentikasi kembali
 sebelum ditulis ke AudioTrack. `release()` membatalkan job dan membebaskan resource.
+Host memanggil `core.onHostBackgrounded()` pada Activity `onStop` agar playback melepas buffer/resource;
+operasi ini tidak menghentikan service perekaman. Demo sudah memasang hook ini.
 
 `inspect` sukses tetap VERIFIED_PARTIAL: hash/chain/format/tag/frame dibanding indeks lokal;
 tidak tersedia final manifest bertanda tangan. Salah kunci dan rusaknya paket dilaporkan tanpa menuduh audio asli diubah.
@@ -38,4 +40,5 @@ lalu menambah outbox dengan migration Room teruji. Receipt tidak boleh menghapus
 
 Error recorder minimum: MIC_PERMISSION, SERVICE_START_FAILED, FOREGROUND_PERMISSION,
 STORAGE_WRITE_FAILED, CAPTURE_FAILED, SERVICE_INTERRUPTED. Kegagalan sensitif tidak diteruskan sebagai stacktrace.
+LOCAL_STORAGE_UNAVAILABLE menandakan inisialisasi/recovery lokal gagal; NO_AUDIO_CAPTURED menandai stop tanpa frame aman.
 Diagnostik latency, haptic preferences, variasi perangkat, pengukuran baterai, dan gap audio masih perlu validasi lanjut.

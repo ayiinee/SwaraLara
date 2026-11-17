@@ -16,6 +16,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.*
 
 @Composable
@@ -25,6 +27,9 @@ fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier,
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var permission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        permission = ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+    }
     var message by remember { mutableStateOf<String?>(null) }
     var holding by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
