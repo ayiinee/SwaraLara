@@ -1,0 +1,4 @@
+sdk.dir=D:/Android/Sdk
+# M1 tidak memakai konfigurasi backend.
+# SUPABASE_URL=https://your-project.supabase.co
+# SUPABASE_PUBLISHABLE_KEY=your-publishable-key
