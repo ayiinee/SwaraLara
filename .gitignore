@@ -12,5 +12,12 @@
 *.jks
 *.keystore
 *.swseg
+*.pcm
+*.wav
+*.swshare
+recordings/
 *.tmp
 captures/
+hs_err_pid*.log
+replay_pid*.log
+*.hprof

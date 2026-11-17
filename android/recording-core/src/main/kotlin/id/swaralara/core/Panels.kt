@@ -2,6 +2,7 @@ package id.swaralara.core
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,18 +28,27 @@ fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier,
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var permission by remember { mutableStateOf(ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) }
+    var notifications by remember { mutableStateOf(Build.VERSION.SDK_INT < 33 ||
+        ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         permission = ContextCompat.checkSelfPermission(context,Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        notifications = Build.VERSION.SDK_INT < 33 ||
+            ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     }
     var message by remember { mutableStateOf<String?>(null) }
     var holding by remember { mutableStateOf(false) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         permission = it; message = if (it) "Izin diberikan. Tahan tombol untuk mulai." else "Izin mikrofon ditolak. Aktifkan izin untuk merekam."
     }
+    val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
     Column(modifier.padding(16.dp),verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Perlindungan lokal — belum memiliki pemulihan bersama",style = MaterialTheme.typography.titleMedium)
         Text("Gunakan ucapan simulasi. Rekaman dimulai setelah mikrofon aktif.")
         if (!permission) Button(onClick = { launcher.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Izinkan mikrofon") }
+        if (!notifications && Build.VERSION.SDK_INT >= 33) {
+            OutlinedButton(onClick = { notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text("Izinkan notifikasi perekaman") }
+            Text("Notifikasi menyediakan aksi Hentikan. Jika izin ditolak, Android tetap mengatur indikator layanan dan mikrofon.")
+        }
         Surface(color = if (holding) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.primaryContainer,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp)

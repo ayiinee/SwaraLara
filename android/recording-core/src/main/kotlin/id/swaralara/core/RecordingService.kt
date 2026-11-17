@@ -18,12 +18,14 @@ import java.util.concurrent.atomic.AtomicBoolean
 class RecordingService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var job: Job? = null
+    private var latestCommandId = 0
     private val stopping = AtomicBoolean(false)
     @Volatile private var audio: AudioRecord? = null
     private lateinit var core: CoreRuntime
     override fun onCreate() { super.onCreate(); core = CoreRuntime.get(this) }
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestCommandId = startId
         if (intent?.action == STOP) {
             stopping.set(true)
             if (core.recorder.state.value.busy) {
@@ -50,11 +52,11 @@ class RecordingService : Service() {
         catch (_: Exception) { core.localRecorder.fail("INVALID_SESSION"); stopSelf(); return START_NOT_STICKY }
         val config = CaptureConfig(intent.getStringExtra("kind") ?: "retrospective")
         stopping.set(false)
-        job = scope.launch { record(id,config,startId) }
+        job = scope.launch { record(id,config) }
         return START_NOT_STICKY // Never reuse a session/key/counter after process death.
     }
     @android.annotation.SuppressLint("MissingPermission")
-    private suspend fun record(id: UUID, config: CaptureConfig, startId: Int) {
+    private suspend fun record(id: UUID, config: CaptureConfig) {
         var session: SegmentSession? = null
         var segmenter: PcmSegmenter? = null
         val readBuffer = ByteArray(8192)
@@ -118,7 +120,7 @@ class RecordingService : Service() {
                 withContext(Dispatchers.Main) {
                     // Keep terminal state and service teardown atomic with respect to a new start intent.
                     job = null
-                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(startId)
+                    stopForeground(STOP_FOREGROUND_REMOVE); stopSelfResult(latestCommandId)
                     core.localRecorder.publish(core.recorder.state.value.copy(capture = finalState,errorCode = error))
                 }
             }

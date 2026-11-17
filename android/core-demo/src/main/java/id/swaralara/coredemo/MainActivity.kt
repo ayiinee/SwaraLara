@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import id.swaralara.core.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.catch
 import java.text.DateFormat
 import java.util.Date
 import java.util.UUID
@@ -35,7 +36,15 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable private fun DemoScreen(core: CoreRuntime) {
-    val recordings by core.vault.observeRecordings().collectAsStateWithLifecycle(emptyList())
+    var vaultReadFailed by remember { mutableStateOf(false) }
+    val recordingFlow = remember(core) {
+        core.vault.observeRecordings().catch { error ->
+            if (error is CancellationException) throw error
+            vaultReadFailed = true
+            emit(emptyList())
+        }
+    }
+    val recordings by recordingFlow.collectAsStateWithLifecycle(emptyList())
     val recorder by core.recorder.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf<UUID?>(null) }
@@ -59,7 +68,8 @@ class MainActivity : ComponentActivity() {
         RecorderPanel(core.recorder)
         HorizontalDivider()
         Text("Brankas lokal (${recordings.size})",style = MaterialTheme.typography.titleLarge)
-        if (recordings.isEmpty()) Text("Belum ada rekaman. Izinkan mikrofon, lalu tahan tombol.")
+        if (vaultReadFailed) Text("Brankas belum dapat dibaca. Periksa ruang penyimpanan lalu mulai ulang aplikasi.",color = MaterialTheme.colorScheme.error)
+        else if (recordings.isEmpty()) Text("Belum ada rekaman. Izinkan mikrofon, lalu tahan tombol.")
         recordings.forEach { recording ->
             OutlinedButton(modifier = Modifier.fillMaxWidth(),enabled = !recorder.busy && !working,
                 onClick = { selected = recording.id; diagnostic = "Rekaman dipilih; belum diverifikasi."; scope.launch { core.playback.release() } }) {

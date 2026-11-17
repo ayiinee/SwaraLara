@@ -9,16 +9,17 @@ android {
     compileSdk = 35
     defaultConfig { minSdk = 26; testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner" }
     buildFeatures { compose = true }
+    packaging { resources.excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     kotlinOptions { jvmTarget = "17" }
 }
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 dependencies {
-    api(project(":core-crypto"))
+    implementation(project(":core-crypto"))
     implementation(libs.core.ktx)
-    implementation(libs.coroutines.android)
-    implementation(platform(libs.compose.bom))
-    implementation(libs.compose.ui)
+    api(libs.coroutines.android)
+    api(platform(libs.compose.bom))
+    api(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.activity.compose)
     implementation(libs.lifecycle.compose)
