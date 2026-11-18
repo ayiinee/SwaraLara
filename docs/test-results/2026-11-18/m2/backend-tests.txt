@@ -1,0 +1,20 @@
+✔ Supabase adapter verifies JWT through Auth and transports RPC over HTTP (7949.1462ms)
+✔ production API adapter uploads immutable ciphertext and verifies Storage bytes over HTTP (7729.9185ms)
+✔ deny direct table/RPC/storage access even with unrelated permissive policy (5594.2198ms)
+✔ unauthenticated/expired token and forged actor body fail closed (3.887ms)
+✔ device proof rejects altered key, private keyset and device ownership takeover (41.3432ms)
+✔ invitation expires/consumes once and link needs both device signatures (68.2471ms)
+✔ immutable signed policy pins members, rejects demo and changed fingerprints (68.5408ms)
+✔ A/B isolation and member permissions cover reads/uploads/commit/audit/path injection (58.1107ms)
+✔ verified commit handles loss before/after upload and lost receipt idempotently (94.7355ms)
+✔ header corruption and declaration/hash mismatch never create committed metadata (24.5663ms)
+✔ request bounds reject malformed UTF-8, oversized bodies and excess attempts (29.5589ms)
+✔ strict parsing rejects duplicate/escaped keys, trailing bytes and invalid ASN.1 (2.6029ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 12
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 25425.1522

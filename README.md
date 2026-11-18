@@ -6,7 +6,9 @@ Gunakan ucapan simulasi; prototipe belum divalidasi untuk pengaduan nyata.
 
 M0 sudah build. Alur utama M1 lulus pada emulator Android 15: 6 test JVM, 6 test vault Android,
 dan 1 test gestur/recorder/pemulihan/player. Android lint lulus dengan nol error.
-Perangkat fisik dan integrasi backend belum diuji; rincian serta log aktual ada di [progres](docs/progress.md).
+M2 menambahkan backend API, policy bertanda tangan dan sinkronisasi Android.
+Dua belas tes backend dan sepuluh tes Android lulus; gate Supabase penuh dan perangkat fisik masih terbuka.
+Rincian serta log aktual ada di [progres](docs/progress.md).
 
 ## Menjalankan
 
@@ -42,9 +44,25 @@ Verifikasi segmen belum membuktikan kelengkapan akhir terhadap manifest bertanda
 - `android/core-crypto`: AES-GCM, codec SWL1, chain, segmenter, adapter Bouncy Castle Shamir dan unit tests.
 - `android/recording-core`: facade, AudioRecord foreground service, Keystore, Room, recovery file, AudioTrack, panel Compose.
 - `android/core-demo`: aplikasi uji lokal `id.swaralara.coredemo`.
-- `android/app`: scaffold aplikasi utama untuk Orang 1, `id.swaralara.app`.
+- `android/app`: login, identitas/trust, policy capture dan antrean upload M2, `id.swaralara.app`.
+- `supabase`: migrations/RLS, Edge API dan pengujian PostgreSQL/HTTP.
 - [Progres dan hambatan](docs/progress.md), [pengujian](docs/core-testing.md), [kontrak integrasi](docs/core-contract.md).
 
-Branch inti mengikuti brief: `feat/recording-crypto`. Branch rekan yang disarankan: `feat/app-backend`.
-Commit dilakukan per fondasi/inti/pengujian. Tidak ada deploy, push, atau perubahan database hosted otomatis.
-M2 baru diaktifkan setelah gate pengujian M1 terpenuhi; rekaman `demo_2of3` tidak dapat diunggah sebagai rekaman integrated.
+Branch inti mengikuti brief: `feat/recording-crypto`; task M2 memakai `feat/app-backend`.
+Commit dan push dilakukan sesuai permintaan pengguna. Database hosted belum diubah.
+Rekaman `demo_2of3` tidak dapat diunggah sebagai rekaman integrated.
+
+## Backend dan integrasi Android M2
+
+Node 24+: `npm ci`, lalu `npm test`. Test suite menjalankan migration PostgreSQL
+dan adapter Supabase terhadap fixture HTTP. Untuk menjalankan Supabase lokal asli
+dibutuhkan Docker engine dan Supabase CLI; ikuti [panduan backend](docs/backend-testing.md).
+Lihat [kontrak API](docs/backend-api.md) untuk auth, trust dan upload/commit.
+
+Isi URL/publishable key pada `android/local.properties`, build `:app:assembleDebug`.
+Login dan daftarkan perangkat, pasangkan dua akun/perangkat uji melalui undangan,
+cocokkan fingerprint kedua pihak lalu pilih policy sebelum merekam. WorkManager
+mengantrekan ciphertext, commit server membuktikan header/hash/chain, dan receipt
+memperbarui status lokal. Saat gagal/token expired, data lokal tetap tersedia.
+HPKE share distribution, approval, signed manifest dan recovery lintas perangkat
+belum aktif; sync cloud tetap recovery degraded dan DEK lokal dipertahankan.

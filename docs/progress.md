@@ -1,6 +1,7 @@
 # Progres SwaraLara — 18 November 2026
 
-Branch task: `feat/recording-crypto` (Orang 2 sesuai brief). Seluruh commit lokal; belum push/deploy.
+Branch task saat ini: `feat/app-backend`, berangkat dari hasil M1 di `feat/recording-crypto`.
+Checkpoint `9bc6609` sudah dipush ke GitHub atas permintaan pengguna; tidak ada deployment hosted.
 
 ## Status milestone
 
@@ -8,8 +9,8 @@ Branch task: `feat/recording-crypto` (Orang 2 sesuai brief). Seluruh commit loka
 |---|---|---|
 | M0 | Empat modul Android/JVM, version catalog, wrapper terverifikasi, scaffold host utama | APK debug demo dan app berhasil dihasilkan; 6 test Gradle crypto lulus |
 | M1 | Crypto, recorder/service, panel gestur/izin, Room/Keystore, file atomik/recovery, brankas demo, Shamir lokal, verifikasi dan AudioTrack | **Alur utama lulus pada emulator Android 15**; 6 test vault + 1 test UI, force-stop dan cabut izin diperiksa. Perangkat fisik dan skenario lanjutan belum diuji |
-| M2 | Facade snapshot/receipt, kontrak dan fixture ciphertext handoff tersedia; demo cloud ack ditolak | Belum terhubung: migration/API/Auth/Storage Orang 1 belum tersedia pada repositori. Policy/member snapshot integrated dan outbox belum diimplementasikan |
-| M3–M4 | Belum diimplementasikan | HPKE, pairing, request/approval, manifest/signature/checkpoint dan penguatan perangkat belum diuji |
+| M2 | Migration/RLS, API Auth/device/trust/recording/upload/commit/audit, private bucket, signed policy, Room v2/outbox dan WorkManager terintegrasi | **Alur lokal Android→HTTP API→PostgreSQL lulus**, 12 tes backend + 10 Android. Supabase Auth/Storage/Edge Runtime asli belum diuji karena Docker/CLI belum tersedia; gate provider masih terbuka |
+| M3–M4 | Public identity HPKE/signing dan pairing minimum tersedia untuk M2; distribusi share/approval/manifest belum diimplementasikan | Pemulihan lintas perangkat, signed final manifest/checkpoint dan penguatan perangkat belum diuji |
 
 ## Fitur yang telah ditulis
 
@@ -28,10 +29,10 @@ Branch task: `feat/recording-crypto` (Orang 2 sesuai brief). Seluruh commit loka
   korupsi diuji pada salinan memori, playback PCM langsung ke AudioTrack dengan pause/release.
 - Satu implementasi core untuk demo dan scaffold app utama, sandbox terpisah; aplikasi demo tanpa internet/account.
 
-**Ditulis tidak berarti seluruh perilaku Android telah diuji.** Tidak ada klaim paket bertanda tangan,
+**Ditulis tidak berarti seluruh perilaku Android telah diuji.** Tidak ada klaim final manifest bertanda tangan,
 distribusi lintas perangkat, pemulihan saat kehilangan perangkat, atau kesiapan pengaduan nyata.
 
-## Pengujian yang benar-benar dijalankan
+## Pengujian M0–M1 yang benar-benar dijalankan
 
 | Pemeriksaan | Hasil |
 |---|---|
@@ -61,7 +62,7 @@ Spike awal memakai Kotlin compiler cache 2.2.10 dengan language/API 2.1. Verifik
 **compiler dan stdlib 2.1.20 yang dipin**, BC 1.83, JUnit 4.13.2 serta JDK 17 lengkap; keenam test lulus.
 JAR compiler dicocokkan dengan checksum Maven resmi. Hasil langsung ini belum menggantikan build APK/lint Gradle.
 
-## Hambatan dan langkah berikutnya
+## Catatan hambatan M0–M1 (historis)
 
 1. JDK awal yang dirujuk environment sudah hilang. JDK 17 lengkap dan Gradle 8.11.1 kini tersedia di `.tools/`
    yang diabaikan Git; tidak mengubah instalasi Java sistem. Script `scripts/verify.ps1` dapat menemukannya.
@@ -114,3 +115,74 @@ status recovery cloud tetap degraded dan DEK lokal dipertahankan.
 Checkpoint source ini dikomit dan dipush atas permintaan pengguna, lalu pekerjaan
 verifikasi dan dokumentasi M2 dilanjutkan. Konfigurasi lokal, credential, cache,
 artefak build dan data rekaman tetap diabaikan Git.
+
+## M2 — hasil setelah checkpoint
+
+Implementasi backend dan Android sudah terhubung pada lingkungan uji lokal.
+Catatan checkpoint di atas adalah kondisi historis; masalah DNS dependency dan
+build app sudah teratasi. M2 belum dinyatakan lulus deployment provider penuh.
+
+Fitur yang selesai pada task ini:
+
+- Dua migration membentuk 14 tabel target PRD + rate limits, constraints, RLS,
+  private bucket, RPC service-only, transaksi registrasi/commit dan audit.
+- JWT diverifikasi melalui Auth sebelum service role dipakai; actor tidak diambil
+  dari body. Kepemilikan dicek di route dan transaksi. Akses antaruser ditolak.
+- Public device proof SWD2, trust invitation satu kali/expired, dua konfirmasi
+  SWT1 dan snapshot SWP1 bertanda tangan dengan fingerprint anggota immutable.
+- Signed upload tanpa upsert, commit membaca SWL1 dan SHA-256 aktual, memeriksa
+  index/chain/nonce/format/frame, receipt idempotent dan signed read URL owner.
+- Android login/signup/refresh, session Keystore-wrapped, identitas Tink/JCA,
+  layar trust/fingerprint, pilihan policy sebelum capture, Room v2/outbox dan
+  WorkManager network/backoff. Refresh tidak menimpa session yang sudah dihapus.
+- Retry memakai ciphertext dan metadata registrasi yang sama. Expired refresh
+  mengubah state menjadi NEEDS_AUTH; rekaman lokal tetap berjalan. Demo/fallback
+  tidak dipromosikan ke cloud; recovery tetap DEGRADED, file dan DEK lokal utuh.
+
+| Pengujian aktual | Hasil |
+|---|---|
+| `node --test --test-concurrency=1 supabase/tests/*.test.ts` | **12/12 lulus**; migrations/RLS/RPC PostgreSQL PGlite, isolation, policy/proof, token, body/rate bounds, retry dan adapter HTTP Storage |
+| Deno check / lint / fmt check | Lulus untuk function produksi; formatting function dan tests lulus. Lint mengizinkan explicit any pada batas JSON/RPC tervalidasi; regex penolak kontrol diberi pengecualian lokal |
+| Build app/core-demo + kedua app-test APK + recording-core-test APK | **BUILD SUCCESSFUL**, 212 task (26 executed, 186 up-to-date) pada build terakhir |
+| Android lint app / recording-core | **0 error**, masing-masing 43 dan 3 warning; saran versi dependency/AGP/target, ikon, UseKtx dan singleton application context |
+| `LocalVaultTest` + `CloudVaultTest` | **OK (8 tests)**, 6 regresi M1 + migrasi Room v1→v2 mempertahankan recording/segment/wrapped key + receipt/cloud key lifecycle |
+| `CloudIntegrationTest` | **OK (1 test)**, 15,811 detik; AudioRecord Android→API produksi→SDK Supabase→HTTP fixture→PostgreSQL; upload/commit terputus, lost receipt, retry, hash binding, worker success/failure, refresh valid/expired, isolation dan capture lokal setelah auth gagal |
+| `LocalFlowTest` | **OK (1 test)**, 17,971 detik; gestur → rekam → Shamir lokal → verifikasi → playback tetap berjalan setelah perubahan M2 |
+| `:core-crypto:test` | UP-TO-DATE; hasil 6 tes M1 masih valid, tidak dihitung sebagai eksekusi baru |
+
+Log aktual: [test-results/2026-11-18/m2](test-results/2026-11-18/m2/).
+Emulator AOSP API35 memakai mikrofon sintetis, satu core dan RAM 2 GB.
+Public key Android benar-benar dihasilkan Tink/Android Keystore; holder ephemeral
+didaftarkan dan mengonfirmasi melalui API. Tidak ada private key/share seed.
+
+Hambatan tersisa dan tindak lanjut:
+
+1. Docker engine dan Supabase CLI belum tersedia. PostgreSQL embedded menjalankan
+   SQL nyata, sedangkan Auth/Storage provider diganti fixture protokol. Karena itu
+   gateway Edge, RLS Storage provider, capability expiry dan refresh/signup pada
+   Supabase asli masih harus diuji. Ikuti [backend-testing.md](backend-testing.md)
+   saat stack lokal tersedia; belum ada hosted project yang diubah.
+2. Perangkat fisik belum diuji. Rotasi, lock screen, panggilan, storage penuh,
+   baterai/latency/gap audio tetap mengikuti checklist M1. ADB install/test task
+   ini hanya menarget emulator-5556, tidak mengakses mikrofon perangkat fisik.
+3. Distribusi HPKE share, ack pemegang, approval/access request, signed manifest,
+   checkpoint dan pemulihan lintas perangkat adalah M3/M4. Endpoint belum tersedia
+   tidak mengembalikan keberhasilan palsu. Status synced hanya salinan remote.
+4. Resource mesin terbatas: Gradle dihentikan sebelum emulator untuk melepas RAM.
+   Satu kesalahan lint konfigurasi domain debug diperbaiki dengan batas domain
+   eksplisit; build/lint/tes terakhir sudah lulus. Beberapa API serialization Tink
+   yang dipin masih memberi peringatan deprecation dan perlu migrasi API selanjutnya.
+
+Panduan dan kontrak kini tersedia di [backend-api.md](backend-api.md),
+[backend-testing.md](backend-testing.md), dan [core-contract.md](core-contract.md).
+
+Commit M2 pada branch task yang sama:
+
+- `9bc6609` — checkpoint backend/API + integrasi Android, dipush sebelum melanjutkan sesuai permintaan pengguna.
+- `9cf158f` — verifikasi transport Storage, transaksi registrasi, validasi/rate limit, format/lint dan panduan backend.
+- `51e02fb` — perbaikan worker/session, migrasi teruji, retry upload dan fallback lokal; dependency locks aktual.
+- Commit dokumentasi berikutnya menyimpan laporan dan log hasil pengujian task ini.
+
+Emulator dan server fixture dihentikan setelah tes untuk melepas resource. Data
+tes terenkripsi tetap berada di sandbox emulator; credential fixture bersifat
+ephemeral dan tidak masuk Git. Branch task dipush tanpa merge/force-push ke main.
