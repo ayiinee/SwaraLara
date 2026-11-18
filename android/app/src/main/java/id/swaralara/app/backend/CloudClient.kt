@@ -120,6 +120,9 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
             .put("hpkePublicKeysetBase64",identity.hpkePublicKeysetBase64).put("signingPublicSpkiBase64",identity.signingPublicSpkiBase64).put("proofSignatureBase64",identity.proofSignatureBase64))
     }
     suspend fun links()=api("/trust") as JSONArray
+    suspend fun accessRequests()=api("/access-requests") as JSONArray
+    suspend fun cancelAccess(id: UUID)=api("/access-requests/$id/cancel","POST",JSONObject())
+    suspend fun completeAccess(id: UUID,result: String)=api("/access-requests/$id/complete","POST",JSONObject().put("resultBase64",result).put("signatureBase64",""))
     suspend fun confirm(link: JSONObject,identity: DeviceIdentity) {
         api("/trust/${UUID.fromString(link.getString("id"))}/confirm","POST",JSONObject().put("deviceId",identity.publicIdentity().deviceId)
             .put("signatureBase64",identity.trustConfirmation(UUID.fromString(link.getString("id")))))

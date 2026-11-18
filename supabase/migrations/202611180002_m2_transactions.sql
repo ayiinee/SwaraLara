@@ -7,11 +7,11 @@ declare d public.devices; r public.recordings; s public.recording_segments; inv 
 begin
  if p_actor is null then raise exception 'UNAUTHENTICATED'; end if;
  if p_action='rate' then
-  if p->>'operation' not in ('invitation','accept','upload','read','recording','device') then raise exception 'INVALID'; end if;
+  if p->>'operation' not in ('invitation','accept','upload','read','recording','device','manifest','access') then raise exception 'INVALID'; end if;
   bucket:=date_trunc('minute',clock_timestamp());
   insert into api_rate_limits values(p_actor,p->>'operation',bucket,1)
    on conflict(actor_id,operation,window_start) do update set hits=api_rate_limits.hits+1 returning api_rate_limits.hits into hits;
-  return jsonb_build_object('allowed',hits<=case when p->>'operation' in ('invitation','accept','device') then 10 else 60 end);
+  return jsonb_build_object('allowed',hits<=case when p->>'operation' in ('invitation','accept','device','manifest') then 10 else 60 end);
  elsif p_action='bootstrap' then
   insert into profiles(id,display_name) values(p_actor,p->>'displayName') on conflict(id) do nothing;
   return (select to_jsonb(x) from profiles x where id=p_actor);
@@ -144,6 +144,53 @@ begin
     'committedAtServer',floor(extract(epoch from s.received_at)*1000));
   end if;
   return to_jsonb(r)-'policy_snapshot_bytes'-'policy_signature';
+ end if;
+ if p_action='manifest' then
+  select * into r from recordings where id=(p->>'id')::uuid and owner_user_id=p_actor for update;
+  if not found then raise exception 'NOT_FOUND'; end if;
+  if exists(select 1 from recording_manifests where recording_id=r.id) then
+   if (select manifest_sha256 from recording_manifests where recording_id=r.id)<>p->>'manifestHash' then raise exception 'CONFLICT'; end if;
+   return jsonb_build_object('alreadyStored',true,'manifestHash',p->>'manifestHash');
+  end if;
+  insert into recording_manifests(recording_id,manifest_bytes,signature_der,signing_fingerprint,manifest_sha256)
+   values(r.id,decode(p->>'manifestBase64','base64'),decode(p->>'signatureBase64','base64'),
+    (select signing_fingerprint from devices where id=r.source_device_id),p->>'manifestHash');
+  insert into audit_events(recording_id,actor_user_id,actor_device_id,event_type) values(r.id,p_actor,r.source_device_id,'manifest_committed');
+  return jsonb_build_object('recordingId',r.id,'manifestHash',p->>'manifestHash','verified',true);
+ elsif p_action='share_envelope' then
+  select * into r from recordings where id=(p->>'id')::uuid and owner_user_id=p_actor for update;
+  if not found then raise exception 'NOT_FOUND'; end if;
+  insert into share_envelopes(recording_id,share_index,holder_device_id,scheme_version,envelope_ciphertext,context_bytes,owner_signature,ciphertext_sha256)
+   values(r.id,(p->>'shareIndex')::smallint,(p->>'holderDeviceId')::uuid,'shamir-bc-gf256-v1',decode(p->>'ciphertextBase64','base64'),decode(p->>'contextBase64','base64'),decode(p->>'signatureBase64','base64'),encode(digest(decode(p->>'ciphertextBase64','base64'),'sha256'),'hex'))
+   on conflict(recording_id,share_index) do update set envelope_ciphertext=excluded.envelope_ciphertext
+    where share_envelopes.ciphertext_sha256=excluded.ciphertext_sha256;
+  return jsonb_build_object('recordingId',r.id,'shareIndex',(p->>'shareIndex')::int);
+ elsif p_action='access_request' then
+  insert into access_requests(id,recording_id,requester_user_id,requester_device_id,request_hpke_public_keyset,request_bytes,request_signature,expires_at)
+   values((p->>'id')::uuid,(p->>'recordingId')::uuid,p_actor,(p->>'requesterDeviceId')::uuid,decode(p->>'requestHpkePublicKeysetBase64','base64'),decode(p->>'requestBytesBase64','base64'),decode(p->>'signatureBase64','base64'),(p->>'expiresAt')::timestamptz)
+   returning to_jsonb(access_requests) into m;
+  return to_jsonb(m);
+ elsif p_action='access_requests' then
+  return coalesce((select jsonb_agg(to_jsonb(x) order by created_at desc) from access_requests x where requester_user_id=p_actor or exists(select 1 from recordings z where z.id=x.recording_id and z.owner_user_id=p_actor)),'[]');
+ elsif p_action='access_decision' then
+  select to_jsonb(x) into m from access_requests x where id=(p->>'id')::uuid for update;
+  if not found or m->>'state' not in ('pending','ready') then raise exception 'NOT_FOUND'; end if;
+  select * into r from recordings where id=(m->>'recording_id')::uuid;
+  select * into d from devices where user_id=p_actor and state='active' and id in (select holder_device_id from recording_members where recording_id=r.id and share_index=(p->>'shareIndex')::int);
+  if not found then raise exception 'NOT_FOUND'; end if;
+  insert into access_decisions(request_id,recording_id,share_index,holder_user_id,holder_device_id,decision,signed_decision_bytes,decision_signature)
+   values(m.id,r.id,(p->>'shareIndex')::smallint,p_actor,d.id,p->>'decision',decode(p->>'contextBase64','base64'),decode(p->>'signatureBase64','base64'));
+  if p->>'decision'='approve' then insert into share_releases(request_id,recording_id,share_index,holder_device_id,release_ciphertext,context_bytes,holder_signature,ciphertext_sha256)
+   values(m.id,r.id,(p->>'shareIndex')::smallint,d.id,decode(p->>'releaseCiphertextBase64','base64'),decode(p->>'contextBase64','base64'),decode(p->>'signatureBase64','base64'),encode(digest(decode(p->>'releaseCiphertextBase64','base64'),'sha256'),'hex')); end if;
+  return jsonb_build_object('requestId',m.id,'shareIndex',(p->>'shareIndex')::int,'decision',p->>'decision');
+ elsif p_action='access_releases' then
+  return coalesce((select jsonb_agg(to_jsonb(x)) from share_releases x join access_requests q on q.id=x.request_id where q.id=(p->>'id')::uuid and q.requester_user_id=p_actor),'[]');
+ elsif p_action='access_cancel' then
+  update access_requests set state='cancelled' where id=(p->>'id')::uuid and requester_user_id=p_actor and state='pending';
+  if not found then raise exception 'NOT_FOUND'; end if; return jsonb_build_object('cancelled',true);
+ elsif p_action='access_complete' then
+  update access_requests set state='completed',completed_at=clock_timestamp() where id=(p->>'id')::uuid and requester_user_id=p_actor and state='ready';
+  if not found then raise exception 'NOT_FOUND'; end if; return jsonb_build_object('completed',true);
  end if;
  raise exception 'UNSUPPORTED_ACTION';
 exception when unique_violation then raise exception 'CONFLICT';

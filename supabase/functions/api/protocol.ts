@@ -234,6 +234,18 @@ export const deviceProof = async (
   );
 export const trustProof = (id: string, deviceId: string) =>
   concat(new TextEncoder().encode("SWT1"), uuidBytes(id), uuidBytes(deviceId));
+export function bindingBytes(tag: string, fields: (string | number | Uint8Array)[]) {
+  demand(/^[A-Za-z0-9._-]{1,32}$/.test(tag));
+  const out: Uint8Array[] = [new TextEncoder().encode(tag)];
+  for (const value of fields) {
+    const bytes = typeof value === "number"
+      ? new Uint8Array([value >>> 24, value >>> 16, value >>> 8, value])
+      : typeof value === "string" ? new TextEncoder().encode(value) : value;
+    demand(bytes.length <= 65535, "BINDING_TOO_LARGE");
+    out.push(new Uint8Array([bytes.length >>> 8, bytes.length]), bytes);
+  }
+  return concat(...out);
+}
 export function validateHpkePublic(bytes: Uint8Array) {
   const protobuf = (b: Uint8Array): Map<number, number | Uint8Array> => {
     const out = new Map<number, number | Uint8Array>();
