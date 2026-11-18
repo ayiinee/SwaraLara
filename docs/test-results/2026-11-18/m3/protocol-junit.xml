@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="id.swaralara.core.M3ProtocolTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-18T13:49:42" hostname="DESKTOP-77244AT" time="5.6">
+  <properties/>
+  <testcase name="exportPublicJvmVectorsForRealDerWebCryptoInterop" classname="id.swaralara.core.M3ProtocolTest" time="2.461"/>
+  <testcase name="hpkeConfidentialityDoesNotReplacePinnedSenderAuthentication" classname="id.swaralara.core.M3ProtocolTest" time="0.5"/>
+  <testcase name="publicKeyParserRejectsPrivateKeysetsAndFreshRequestsHaveDistinctKeys" classname="id.swaralara.core.M3ProtocolTest" time="0.158"/>
+  <testcase name="signedButIncorrectShareStillFailsAudioAuthentication" classname="id.swaralara.core.M3ProtocolTest" time="1.058"/>
+  <testcase name="wrongRecipientAndEveryRequestContextBindingRejectReplay" classname="id.swaralara.core.M3ProtocolTest" time="0.355"/>
+  <testcase name="bothPoliciesEnvelopeReleaseEveryAllowedPairAndRealGcmRoundTrip" classname="id.swaralara.core.M3ProtocolTest" time="0.99"/>
+  <testcase name="strictPolicyActionBase64AndExpiryParsingRejectMalformedInputs" classname="id.swaralara.core.M3ProtocolTest" time="0.074"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

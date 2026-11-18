@@ -105,3 +105,35 @@ Pemeriksaan manual tambahan pada emulator yang sama:
 
 Perangkat fisik, rotasi, storage penuh, panggilan masuk, layar terkunci, gap/overrun serta baterai masih belum diuji.
 Emulator dihentikan setelah pengujian; tidak ada service perekaman yang dibiarkan berjalan.
+
+## M3 Orang 2 — pengujian tanpa emulator
+
+Jalankan `:core-crypto:test :recording-core:testDebugUnitTest` dari android/.
+Suite crypto memiliki 8 test (6 lama, 2 codec integrated); M3ProtocolTest memiliki
+7 test dengan Tink Android 1.17.0/JCA pada JVM: kedua policy sampai GCM, context/
+recipient/request replay, autentikasi pengirim, parser strict, share salah yang
+tetap ditandatangani, penolakan keyset privat dan request key yang selalu baru.
+Tidak ada Android Keystore/Room palsu agar suite itu tampak lulus.
+
+`node scripts/verify-m3-signatures.ts` memeriksa enam vektor signature publik JVM,
+struktur LP, signature valid, payload berubah dan signature dengan trailing bytes.
+Script juga dapat dijalankan dengan Deno `run --allow-read=docs/fixtures/m3-public-signatures-v1.json`.
+Fixture `origin=jvm` tidak diklaim berasal dari eksekusi Android. Data sintetis saja.
+
+Suite Android KeyExchangeTest menambahkan 11 skenario: retirement kedua policy,
+semua pasangan 2-of-3, tampering HPKE/binding, request/cancellation, malformed
+share dengan signature valid, expiry, restart, pin hilang/berubah, proteksi legacy,
+migrasi Room v2→v3, ekspor fixture Android dan batas waktu pada tick milidetik.
+LocalVaultTest/CloudVaultTest tetap menjadi 8 regresi core; migration v1 test kini
+mencakup chain sampai v3. Suite tersebut harus dijalankan pada perangkat/emulator:
+
+```powershell
+adb -s emulator-5556 install -r android/recording-core/build/outputs/apk/androidTest/debug/recording-core-debug-androidTest.apk
+adb -s emulator-5556 shell am instrument -w -r -e class id.swaralara.core.KeyExchangeTest,id.swaralara.core.LocalVaultTest,id.swaralara.core.CloudVaultTest id.swaralara.core.test/androidx.test.runner.AndroidJUnitRunner
+```
+
+Task M3 ini belum menjalankan suite Android: emulator membutuhkan 2048 MB commit
+memory, sementara hanya 1726 MB tersedia. Pengguna memilih melanjutkan tanpa
+emulator. Build APK tidak dihitung sebagai hasil test runtime. Seluruh gate
+Room/Keystore retirement, playback setelah retirement, beberapa perangkat fisik
+dan transport backend M3 tetap terbuka. Detail ada di kontrak M3 dan progress.md.

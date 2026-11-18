@@ -1,0 +1,45 @@
+Starting a Gradle Daemon, 3 stopped Daemons could not be reused, use --status for details
+> Task :core-crypto:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core-crypto:compileKotlin UP-TO-DATE
+> Task :core-crypto:compileJava NO-SOURCE
+> Task :core-crypto:processResources NO-SOURCE
+> Task :core-crypto:classes UP-TO-DATE
+> Task :core-crypto:jar UP-TO-DATE
+> Task :recording-core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :recording-core:preBuild UP-TO-DATE
+> Task :recording-core:preDebugBuild UP-TO-DATE
+> Task :recording-core:generateDebugResValues UP-TO-DATE
+> Task :recording-core:generateDebugResources UP-TO-DATE
+> Task :recording-core:packageDebugResources UP-TO-DATE
+> Task :recording-core:parseDebugLocalResources UP-TO-DATE
+> Task :recording-core:generateDebugRFile UP-TO-DATE
+> Task :recording-core:kspDebugKotlin
+> Task :recording-core:compileDebugKotlin
+w: file:///D:/Lomba/CAPSTONE%20UM/SwaraLara/android/recording-core/src/main/kotlin/id/swaralara/core/CloudIdentity.kt:9:8 'class JsonKeysetWriter : Any, KeysetWriter' is deprecated. Deprecated in Java.
+w: file:///D:/Lomba/CAPSTONE%20UM/SwaraLara/android/recording-core/src/main/kotlin/id/swaralara/core/CloudIdentity.kt:217:35 'fun writeNoSecret(writer: KeysetWriter!): Unit' is deprecated. Deprecated in Java.
+w: file:///D:/Lomba/CAPSTONE%20UM/SwaraLara/android/recording-core/src/main/kotlin/id/swaralara/core/CloudIdentity.kt:217:49 'class JsonKeysetWriter : Any, KeysetWriter' is deprecated. Deprecated in Java.
+
+> Task :recording-core:javaPreCompileDebug UP-TO-DATE
+> Task :recording-core:compileDebugJavaWithJavac NO-SOURCE
+> Task :recording-core:bundleLibRuntimeToJarDebug
+> Task :recording-core:bundleLibCompileToJarDebug
+> Task :recording-core:preDebugUnitTestBuild UP-TO-DATE
+> Task :recording-core:generateDebugUnitTestStubRFile
+> Task :recording-core:kspDebugUnitTestKotlin
+
+> Task :recording-core:compileDebugUnitTestKotlin
+w: file:///D:/Lomba/CAPSTONE%20UM/SwaraLara/android/recording-core/src/test/kotlin/id/swaralara/core/M3ProtocolTest.kt:459:13 Only safe (?.) or non-null asserted (!!.) calls are allowed on a nullable receiver of type 'File?'.
+
+> Task :recording-core:javaPreCompileDebugUnitTest
+> Task :recording-core:compileDebugUnitTestJavaWithJavac NO-SOURCE
+> Task :recording-core:processDebugJavaRes UP-TO-DATE
+> Task :recording-core:processDebugUnitTestJavaRes
+> Task :recording-core:testDebugUnitTest
+> Task :core-crypto:compileTestKotlin UP-TO-DATE
+> Task :core-crypto:compileTestJava NO-SOURCE
+> Task :core-crypto:processTestResources NO-SOURCE
+> Task :core-crypto:testClasses UP-TO-DATE
+> Task :core-crypto:test UP-TO-DATE
+
+BUILD SUCCESSFUL in 2m 51s
+21 actionable tasks: 10 executed, 11 up-to-date

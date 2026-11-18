@@ -44,8 +44,20 @@ Mode/basis ini tidak diasumsikan kompatibel dengan pustaka lain. BC buffers inte
 Codec **khusus demo** `SWD1`: magic 4 + UUID 16 + threshold 1 (=2) + count 1 (=3) + x 1 + y 32 = 55 byte.
 Tolak ID salah, x duplikat, kurang bagian, x di luar 1..3, magic/ukuran/threshold/count salah.
 Bytes hanya berada dalam test/memori; tidak disimpan atau dikirim. Codec ini belum mempunyai holderDeviceId atau
-policySnapshotHash; **dilarang** dipakai sebagai codec bagian integrated. HPKE/signature/binding lengkap dikerjakan M3.
+policySnapshotHash; **dilarang** dipakai sebagai codec bagian integrated. Codec M3 tersedia pada SWB1 di bawah.
 
 Envelope DEK lokal: IV GCM 12 + ciphertext 32 + tag 16 = 60 byte. KEK AES-256 AndroidKeystore alias
 `swaralara.local-kek.v1`; AAD UTF-8 `swaralara/local-dek/v1/<uuid>`. Tidak memerlukan biometrik per segmen.
 M1 mempertahankan envelope; belum ada distribusi atau penghapusan sesudah ack pemegang.
+
+M3 integrated memakai codec **SWB1** 104 byte dan policy-specific 2-of-2/2-of-3,
+HPKE Tink X25519/HKDF-SHA256/AES256GCM, signed context dengan length prefix,
+serta request-specific HPKE untuk pelepasan bagian. Lihat rincian byte binding,
+signature dan lifecycle di [m3-core-contract.md](m3-core-contract.md).
+Device HPKE keyset tetap terbungkus KEK legacy; DEK integrated baru memakai
+KEK unik `swaralara.recording-kek.v2.<recordingId>` dan envelope kind local_dek_v2.
+AAD DEK tetap domain/UUID yang sama, dengan material KEK berbeda per rekaman.
+Request private keyset memakai alias `swaralara.request-kek.v1.<requestId>`
+dan AAD `swaralara/local-dek/v1/request-hpke/<requestId>/<policyHash>`.
+Retirement dan close request menghapus alias terkait, tidak menghapus KEK
+bersama yang masih melindungi data legacy/private device keyset.

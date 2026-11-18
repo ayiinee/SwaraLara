@@ -66,6 +66,50 @@ Tanggal acuan: 17 November 2026.
 21. M3/M4 di luar task M2: schema fondasi ada, tetapi API workflow yang belum tersedia
     tidak mengembalikan sukses palsu. UI menyatakan distribusi/pemulihan belum aktif.
 
+## Keputusan M3 Orang 2 — 18 November 2026
+
+22. Pengguna meminta M3 khusus tugas Orang 2: HPKE, distribusi share dan pemulihan
+    kunci. Task memakai `feat/m3-hpke-recovery` dari hasil M2 `81fd2a3` agar
+    prerequisite identitas/policy/Room tersedia. Branch M1 dan app-backend tidak
+    ditulis ulang. Tidak mengubah app atau backend milik Orang 1 pada task ini.
+23. Codec integrated SWB1 dipisahkan dari demo SWD1. Threshold mengikuti snapshot
+    owner_required_2of2/recovery_2of3. HPKE memakai Tink Android 1.17.0 yang sudah
+    dipin; setiap envelope/release mendapat autentikasi pengirim P-256 terpisah.
+    Context dan signature memakai field length-prefixed; kontrak rinci ada di
+    m3-core-contract.md. Tidak ada algoritma HPKE atau GF(256) baru buatan aplikasi.
+24. Fingerprint public keyset M2 dipertahankan dengan serialisasi writer yang sama;
+    API deprecated belum diganti agar identitas perangkat lama tidak berubah akibat
+    perubahan byte JSON. Public/private serialization request baru memakai API Tink
+    no-secret/secret-access yang diverifikasi pada paket 1.17.0. Namespace identitas
+    terpisah hanya dipakai tes logis; produksi tetap namespace v1 yang sama.
+25. Integrated capture baru memakai local_dek_v2 dan KEK per rekaman. Hapus row saja
+    belum meniadakan salinan wrapper lama di SQLite/WAL; retirement juga menghapus
+    alias KEK rekaman setelah gate sync/semua ack/consent terpenuhi. Crash di antara
+    SQL dan Keystore diselesaikan lewat retry/reconciliation. Legacy local_dek_v1
+    tidak dihapus otomatis karena KEK-nya bersama. Request HPKE juga memakai KEK
+    per request. Unwrap key yang hilang gagal tanpa membuat key pengganti.
+26. Raw DEK hasil rekonstruksi hanya dipakai setelah autentikasi GCM terhadap paket
+    lokal, lalu masuk lease memori terbatas expiry. Tidak ada fallback ke full DEK
+    jika release salah. Release/background/cancel membersihkan sesi; kegagalan
+    pemulihan bukan bukti pemegang tertentu salah atau audio asli telah diubah.
+27. Suite Android disiapkan dengan signing/HPKE identity, Room dan namespace terpisah
+    untuk setiap peran. Receipt server sintetis diberi label test-only; holder ack
+    hanya boleh dibuat setelah decrypt/validate. Emulator tidak berhasil boot karena
+    kekurangan commit memory; pengguna memilih melanjutkan tanpa emulator. Pengujian
+    aktual M3 dilakukan pada JVM dengan Tink/JCA dan verifier Node/Deno. Pembuktian beberapa perangkat fisik,
+    isolasi akun/transport M3, download/import perangkat baru dan approval atomik
+    membutuhkan pekerjaan integrasi Orang 1. Endpoint M3 existing tetap belum aktif.
+28. Kode Kotlin task diformat dengan ktfmt 0.59, artefak dari Maven primer diverifikasi
+    SHA-256 `a493271c137074436a133d72e9e323f91604c97e0c40555629ec39598efead54`.
+    Formatter/cache berada di .tools dan tidak masuk Git. Batas RAM/ruang pagefile
+    mesin menyebabkan lint/build lambat; pengujian emulator dipisahkan dari Gradle.
+29. Helper base64 memakai java.util.Base64 (tersedia sejak minSdk 26), sehingga codec
+    yang sama dapat diuji pada JVM tanpa stub android.util.Base64. Encoding tetap
+    base64 standar tanpa line wrap seperti M2. Masa berlaku memakai satu timestamp
+    yang ditangkap sekali agar tick antarpanggilan tidak melampaui batas 15 menit.
+    Sebelum retirement, seluruh envelope dan share owner diperiksa lagi agar data
+    lokal yang rusak tidak mengizinkan penghapusan full-key envelope.
+
 Rujukan primer yang diperiksa:
 
 - [AGP 8.9: Gradle 8.11.1, JDK minimal 17, API maksimal 35](https://developer.android.com/build/releases/agp-8-9-0-release-notes).
@@ -77,3 +121,5 @@ Rujukan primer yang diperiksa:
 - [Supabase createSignedUploadUrl: URL berlaku dua jam](https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl).
 - [Supabase getUser memvalidasi token melalui Auth server](https://supabase.com/docs/reference/javascript/auth-getuser).
 - [Environment bawaan dan nama secret yang dicadangkan Edge Functions](https://supabase.com/docs/guides/functions/secrets).
+- [Tink Hybrid Encryption dan batas autentikasi pengirim](https://developers.google.com/tink/hybrid).
+- [API public keyset serialization Tink 1.17.0](https://github.com/tink-crypto/tink-java/blob/v1.17.0/src/main/java/com/google/crypto/tink/TinkJsonProtoKeysetFormat.java).
