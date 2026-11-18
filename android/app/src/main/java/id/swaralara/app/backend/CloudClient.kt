@@ -21,6 +21,7 @@ import javax.crypto.spec.GCMParameterSpec
 class CloudError(val status: Int,val code: String): Exception(code)
 data class CloudSession(val userId: UUID,val accessToken: String,val refreshToken: String,val expiresAt: Long)
 class SessionStore(context: Context,private val origin: String) {
+    companion object { internal val refreshLock=Any(); private val sessionLock=Any() }
     private val prefs=context.applicationContext.getSharedPreferences("swl-session-v1",Context.MODE_PRIVATE)
     private fun key(): javax.crypto.SecretKey {
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
@@ -30,16 +31,16 @@ class SessionStore(context: Context,private val origin: String) {
                 .setKeySize(256).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
-    @Synchronized fun save(session: CloudSession) {
+    fun save(session: CloudSession) = synchronized(sessionLock) {
         val plain=JSONObject().put("userId",session.userId).put("accessToken",session.accessToken).put("refreshToken",session.refreshToken).put("expiresAt",session.expiresAt).toString().toByteArray()
         try {
             val c=Cipher.getInstance("AES/GCM/NoPadding").apply {init(Cipher.ENCRYPT_MODE,key());updateAAD(origin.toByteArray())}
             check(prefs.edit().putString("session",encodeBase64(c.iv+c.doFinal(plain))).commit())
         } finally {plain.fill(0)}
     }
-    @Synchronized fun load(): CloudSession? {
-        val envelope=prefs.getString("session",null)?:return null
-        return try {
+    fun load(): CloudSession? = synchronized(sessionLock) {
+        val envelope=prefs.getString("session",null)?:return@synchronized null
+        try {
             val bytes=decodeBase64(envelope);val c=Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,bytes.copyOfRange(0,12)));c.updateAAD(origin.toByteArray())
             val plain=c.doFinal(bytes,12,bytes.size-12)
@@ -47,7 +48,10 @@ class SessionStore(context: Context,private val origin: String) {
             finally {plain.fill(0)}
         }catch(_:Exception){null}
     }
-    fun clear() {check(prefs.edit().remove("session").commit())}
+    fun clear() = synchronized(sessionLock) {check(prefs.edit().remove("session").commit())}
+    internal fun replace(previousRefreshToken: String,session: CloudSession): Boolean = synchronized(sessionLock) {
+        if(load()?.refreshToken!=previousRefreshToken) false else {save(session);true}
+    }
     fun pin(link: JSONObject) {check(prefs.edit().putString("pin:${link.getString("id")}",fingerprints(link)).commit())}
     fun pinned(link: JSONObject)=prefs.getString("pin:${link.getString("id")}",null)==fingerprints(link)
     private fun fingerprints(link: JSONObject)=listOf("ownerDevice","holderDevice").joinToString("/") {
@@ -89,17 +93,22 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
             return bytes
         } finally {connection.disconnect()}
     }
-    private fun session(j: JSONObject): CloudSession = CloudSession(UUID.fromString(j.getJSONObject("user").getString("id")),j.getString("access_token"),j.getString("refresh_token"),
-        System.currentTimeMillis()+j.optLong("expires_in",3600)*1000).also(sessions::save)
+    private fun parsedSession(j: JSONObject): CloudSession = CloudSession(UUID.fromString(j.getJSONObject("user").getString("id")),j.getString("access_token"),j.getString("refresh_token"),
+        System.currentTimeMillis()+j.optLong("expires_in",3600)*1000)
+    private fun session(j: JSONObject)=parsedSession(j).also(sessions::save)
     suspend fun login(email: String,password: String)=withContext(Dispatchers.IO){session(JSONObject(String(http("$baseUrl/auth/v1/token?grant_type=password","POST",JSONObject().put("email",email).put("password",password).toString().toByteArray()))))}
     suspend fun signup(email: String,password: String)=withContext(Dispatchers.IO){
         val j=JSONObject(String(http("$baseUrl/auth/v1/signup","POST",JSONObject().put("email",email).put("password",password).toString().toByteArray())))
         if(j.has("access_token"))session(j) else null
     }
-    private fun accessToken(): String {
+    private fun accessToken(): String = synchronized(SessionStore.refreshLock) {
         val s=sessions.load()?:throw CloudError(401,"AUTH_REQUIRED")
-        if(s.expiresAt>System.currentTimeMillis()+30000)return s.accessToken
-        return try {session(JSONObject(String(http("$baseUrl/auth/v1/token?grant_type=refresh_token","POST",JSONObject().put("refresh_token",s.refreshToken).toString().toByteArray())))).accessToken}
+        if(s.expiresAt>System.currentTimeMillis()+30000)return@synchronized s.accessToken
+        try {
+            val refreshed=parsedSession(JSONObject(String(http("$baseUrl/auth/v1/token?grant_type=refresh_token","POST",JSONObject().put("refresh_token",s.refreshToken).toString().toByteArray()))))
+            if(!sessions.replace(s.refreshToken,refreshed))throw CloudError(401,"AUTH_REQUIRED")
+            refreshed.accessToken
+        }
         catch(e:CloudError){if(e.status in setOf(400,401,403))throw CloudError(401,"AUTH_REQUIRED");throw e}
     }
     suspend fun api(path: String,method: String="GET",body: JSONObject?=null): Any=withContext(Dispatchers.IO){
@@ -118,7 +127,7 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
     }
     suspend fun sync(snapshot: EncryptedRecordingSnapshot,receipt: suspend (UploadReceipt)->Unit) = withContext(Dispatchers.IO) {
         check(snapshot.policyCode!="demo_2of3" && snapshot.cloudRegistrationJson!=null && snapshot.cloudOwnerUserId==sessions.load()?.userId) {"CLOUD_POLICY_OR_ACCOUNT"}
-        api("/recordings","POST",JSONObject(snapshot.cloudRegistrationJson))
+        api("/recordings","POST",JSONObject(requireNotNull(snapshot.cloudRegistrationJson)))
         for(s in snapshot.segments) {
             require(s.file.length()==s.byteLength && s.byteLength<=384098)
             val bytes=s.file.readBytes();val digest=java.security.MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {"%02x".format(it)}

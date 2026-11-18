@@ -6,6 +6,8 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import androidx.work.WorkManager
+import androidx.work.WorkInfo
 import id.swaralara.app.backend.*
 import id.swaralara.core.*
 import kotlinx.coroutines.*
@@ -23,6 +25,14 @@ import java.util.UUID
 class CloudIntegrationTest {
     @get:Rule val permission: GrantPermissionRule=GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
     private val origin="http://10.0.2.2:8787"
+    private suspend fun finished(manager: WorkManager,id: UUID): WorkInfo = withTimeout(60000) {
+        var info: WorkInfo?=null
+        while(info?.state?.isFinished!=true) {
+            delay(250)
+            info=withContext(Dispatchers.IO){manager.getWorkInfoById(id).get()}
+        }
+        requireNotNull(info)
+    }
     private fun fixture(path: String,session: CloudSession,body: JSONObject=JSONObject()): JSONObject {
         val c=URL("$origin/__test__/$path").openConnection() as HttpURLConnection
         try {
@@ -43,7 +53,12 @@ class CloudIntegrationTest {
         val scenario=ActivityScenario.launch(MainActivity::class.java)
         try {
             val owner=client.login("owner@test.local",password)
+            SessionStore(context,origin).clear()
+            assertFalse(store.replace(owner.refreshToken,owner))
+            assertNull(store.load());store.save(owner)
             val identity=core.identity.publicIdentity();client.register(identity)
+            store.save(owner.copy(expiresAt=0));client.api("/devices/me")
+            assertNotEquals(owner.refreshToken,store.load()!!.refreshToken)
             val paired=fixture("pair",owner,JSONObject().put("ownerDeviceId",identity.deviceId)).getJSONObject("data")
             var links=client.links()
             val link=(0 until links.length()).map {links.getJSONObject(it)}.single {it.getString("id")==paired.getString("linkId")}
@@ -78,11 +93,22 @@ class CloudIntegrationTest {
             snapshot.segments.forEachIndexed {i,s->assertArrayEquals(originals[i],s.file.readBytes())}
             val stats=fixture("counts",owner).getJSONObject("data")
             assertEquals(snapshot.segments.size,stats.getInt("segments"));assertEquals(snapshot.segments.size,stats.getInt("objects"))
+            assertEquals(origin,BuildConfig.SUPABASE_URL)
+            val workManager=WorkManager.getInstance(context)
+            val work=finished(workManager,UploadWorker.enqueue(context,id))
+            assertEquals(WorkInfo.State.SUCCEEDED,work.state)
             client.login("outsider@test.local",password)
             try {client.api("/recordings/$id");fail("Cross-user read accepted")}catch(e:CloudError){assertEquals(404,e.status)}
             store.save(owner.copy(expiresAt=0,refreshToken="invalid-refresh"))
             try {client.api("/devices/me");fail("Expired session accepted")}catch(e:CloudError){assertEquals(401,e.status)}
+            assertEquals(WorkInfo.State.FAILED,finished(workManager,UploadWorker.enqueue(context,id)).state)
+            assertEquals(SyncState.NEEDS_AUTH,core.vault.observeRecordings().first().single {it.id==id}.sync)
             assertTrue(core.vault.inspect(id).passed)
+            val local=core.recorder.start(CaptureConfig())
+            withTimeout(30000){core.recorder.state.first {it.capture==CaptureState.RECORDING && it.id==local};core.recorder.state.first {it.savedSegments>=1}}
+            core.recorder.stop()
+            assertEquals(SyncState.LOCAL_ONLY,core.vault.observeRecordings().first().single {it.id==local}.sync)
+            assertTrue(core.vault.inspect(local).passed)
         }finally {
             if(core.recorder.state.value.busy)core.recorder.stop()
             core.playback.release();scenario.close();store.clear()

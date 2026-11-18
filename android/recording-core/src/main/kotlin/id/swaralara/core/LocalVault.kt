@@ -144,6 +144,7 @@ internal class LocalVault(private val root: File, private val db: LocalDatabase,
         check(inspect(recordingId).passed) { "INVALID_SNAPSHOT" }
         val rec = recording(recordingId)
         val cloud=dao.cloud(recordingId.toString())
+        if(cloud!=null) check(rec.captureState in setOf("SEALED","INTERRUPTED")) { "CLOUD_CAPTURE_NOT_FINAL" }
         val json=cloud?.registrationJson ?: cloud?.let {
             val text=org.json.JSONObject().put("id",recordingId).put("sourceDeviceId",CloudCapturePolicy.fromJson(it.policyJson).sourceDeviceId)
                 .put("kind",rec.kind).put("policyCode",rec.policyCode).put("sampleRate",rec.sampleRate).put("channels",1).put("pcmEncoding","pcm16le")

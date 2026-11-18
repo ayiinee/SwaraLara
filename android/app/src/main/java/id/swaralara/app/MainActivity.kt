@@ -15,6 +15,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import id.swaralara.app.backend.*
 import id.swaralara.core.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.catch
 import org.json.JSONObject
 import java.util.UUID
 
@@ -40,7 +41,8 @@ class MainActivity: ComponentActivity() {
     var policy by remember {mutableStateOf<CloudCapturePolicy?>(null)}
     var status by remember {mutableStateOf("Rekam lokal tetap tersedia tanpa login.")}
     var working by remember {mutableStateOf(false)}
-    val recordings by core.vault.observeRecordings().collectAsStateWithLifecycle(emptyList())
+    val recordingFlow=remember(core) {core.vault.observeRecordings().catch {status="Brankas belum dapat dibaca. Data lokal dipertahankan.";emit(emptyList())}}
+    val recordings by recordingFlow.collectAsStateWithLifecycle(emptyList())
     val capture by core.recorder.state.collectAsStateWithLifecycle()
     fun action(block: suspend ()->Unit) {
         if(working)return;working=true
@@ -50,10 +52,10 @@ class MainActivity: ComponentActivity() {
             finally{working=false}}
     }
     suspend fun refresh() {val a=client!!.links();links=(0 until a.length()).map {a.getJSONObject(it)}}
-    LaunchedEffect(capture.capture,capture.id,recordings,session?.userId) {
-        if(capture.capture==CaptureState.SEALED && capture.id!=null && session!=null) {
-            val rec=recordings.find {it.id==capture.id}
-            if(rec?.recovery==RecoveryState.DEGRADED && rec.sync==SyncState.QUEUED) UploadWorker.enqueue(context,capture.id!!)
+    LaunchedEffect(recordings,session?.userId) {
+        if(client!=null && session!=null) {
+            recordings.filter {it.capture in setOf(CaptureState.SEALED,CaptureState.INTERRUPTED) && it.recovery==RecoveryState.DEGRADED && it.sync==SyncState.QUEUED}
+                .forEach {UploadWorker.enqueue(context,it.id)}
         }
     }
     Column(Modifier.systemBarsPadding().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(10.dp)) {
