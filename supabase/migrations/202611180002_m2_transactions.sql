@@ -72,6 +72,8 @@ begin
   end if;
   return to_jsonb(l);
  elsif p_action='register' then
+  -- Serialize even the first insert, when there is no recording row to lock yet.
+  perform pg_advisory_xact_lock(hashtextextended(p->>'id',0));
   select * into r from recordings where id=(p->>'id')::uuid for update;
   if found then
    if r.owner_user_id<>p_actor then raise exception 'NOT_FOUND'; end if;
@@ -82,6 +84,8 @@ begin
   if not found then raise exception 'NOT_FOUND'; end if;
   n:=jsonb_array_length(p->'members');
   if n<>(case when p->>'policyCode'='owner_required_2of2' then 2 when p->>'policyCode'='recovery_2of3' then 3 else 0 end) then raise exception 'INVALID'; end if;
+  if exists(select 1 from jsonb_array_elements(p->'members') with ordinality as member(value,position)
+   where (value->>'shareIndex')::integer<>position) then raise exception 'INVALID'; end if;
   if (p->'members'->0->>'userId')::uuid<>p_actor or p->'members'->0->>'deviceId'<>p->>'sourceDeviceId' then raise exception 'INVALID'; end if;
   for m in select value from jsonb_array_elements(p->'members') loop
    select * into d from devices where id=(m->>'deviceId')::uuid and user_id=(m->>'userId')::uuid and state='active' for share;
