@@ -4,7 +4,7 @@ import java.util.UUID
 import org.json.JSONObject
 
 /** Persistence of public metadata and ciphertext only; never used to sign reserialized JSON. */
-internal object M3Json {
+object M3Json {
     fun policy(p: SignedPolicyPackage) =
         JSONObject()
             .put("snapshotBase64", p.snapshotBase64)

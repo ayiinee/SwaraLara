@@ -145,4 +145,88 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
             receipt(accepted)
         }
     }
+
+    // ── M3: Distribusi envelope ──────────────────────────────────────────────
+    suspend fun uploadEnvelopes(
+        recordingId: UUID,
+        envelopes: List<ShareEnvelope>,
+    ): List<EnvelopeUploadReceipt> = withContext(Dispatchers.IO) {
+        val arr = org.json.JSONArray()
+        envelopes.forEach { e -> arr.put(JSONObject(M3Json.envelope(e))) }
+        val resp = api("/recordings/$recordingId/share-envelopes", "POST",
+            JSONObject().put("envelopes", arr)) as org.json.JSONArray
+        (0 until resp.length()).map { i ->
+            val o = resp.getJSONObject(i)
+            EnvelopeUploadReceipt(
+                UUID.fromString(o.getString("recordingId")),
+                o.getInt("shareIndex"),
+                o.getString("ciphertextHash"),
+                o.getLong("receivedAtServer"),
+            )
+        }
+    }
+
+    suspend fun getMyShare(recordingId: UUID): Pair<SignedPolicyPackage, ShareEnvelope>? =
+        withContext(Dispatchers.IO) {
+            try {
+                val o = api("/recordings/$recordingId/my-share") as JSONObject
+                val policy = SignedPolicyPackage(
+                    o.getJSONObject("policy").getString("snapshotBase64"),
+                    o.getJSONObject("policy").getString("signatureBase64"),
+                )
+                val env = M3Json.envelope(o.getJSONObject("envelope").toString())
+                Pair(policy, env)
+            } catch (e: CloudError) {
+                if (e.status == 404) null else throw e
+            }
+        }
+
+    suspend fun ackShare(
+        recordingId: UUID,
+        ack: DeviceSignedAction,
+    ): Unit = withContext(Dispatchers.IO) {
+        api("/recordings/$recordingId/my-share/ack", "POST",
+            JSONObject(M3Json.action(ack)))
+        Unit
+    }
+
+    // ── M3: Access requests ──────────────────────────────────────────────────
+    suspend fun createAccessRequest(request: KeyAccessRequest): UUID =
+        withContext(Dispatchers.IO) {
+            val o = api("/access-requests", "POST",
+                JSONObject(M3Json.request(request))) as JSONObject
+            UUID.fromString(o.getString("requestId"))
+        }
+
+    suspend fun getAccessRequests(): List<KeyAccessRequest> =
+        withContext(Dispatchers.IO) {
+            val arr = api("/access-requests") as org.json.JSONArray
+            (0 until arr.length()).map { i -> M3Json.request(arr.getJSONObject(i).toString()) }
+        }
+
+    suspend fun approveRelease(
+        requestId: UUID,
+        release: ShareRelease,
+    ): Unit = withContext(Dispatchers.IO) {
+        api("/access-requests/$requestId/decision", "POST",
+            JSONObject().put("approved", true).put("release", JSONObject(M3Json.release(release))))
+        Unit
+    }
+
+    suspend fun getReleases(
+        requestId: UUID,
+        auth: DeviceSignedAction,
+    ): List<ShareRelease> = withContext(Dispatchers.IO) {
+        val arr = api("/access-requests/$requestId/releases?auth=${java.net.URLEncoder.encode(M3Json.action(auth), "UTF-8")}") as org.json.JSONArray
+        (0 until arr.length()).map { i -> M3Json.release(arr.getJSONObject(i).toString()) }
+    }
+
+    suspend fun cancelRequest(
+        requestId: UUID,
+        cancel: DeviceSignedAction,
+    ): Unit = withContext(Dispatchers.IO) {
+        api("/access-requests/$requestId/cancel", "POST",
+            JSONObject(M3Json.action(cancel)))
+        Unit
+    }
 }
