@@ -6,7 +6,6 @@ import {
   deviceProof,
   fields,
   hash,
-  bindingBytes,
   integer,
   label,
   segment,
@@ -346,47 +345,14 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             expiresInSeconds: 60,
           });
         }
-        if (tail === "manifest" && method === "PUT") {
-          await rate("manifest");
-          const p = await body(["manifestBase64", "signatureBase64", "idempotencyKey"]);
-          const manifest = unbase64(p.manifestBase64, 1048576);
-          const signature = unbase64(p.signatureBase64, 80);
-          demand(typeof p.idempotencyKey === "string" && p.idempotencyKey.length <= 128);
+        // M3/M4 workflows are intentionally not substituted with approval/decrypt stubs.
+        if (
+          ["manifest", "notes", "share-envelopes", "my-share", "my-share/ack"]
+            .includes(tail)
+        ) {
           await call("owner", { id });
-          const d = await call("device", { id: (await call("owner", { id })).source_device_id });
-          await verify(unbase64(d.signingBase64), bindingBytes("SWM1", [id, manifest]), signature);
-          return respond(await call("manifest", { id, manifestBase64: p.manifestBase64, signatureBase64: p.signatureBase64, manifestHash: await sha(manifest), idempotencyKey: p.idempotencyKey }));
+          throw new ApiError(501, "MILESTONE_NOT_IMPLEMENTED");
         }
-        if (tail === "share-envelopes" && method === "POST") {
-          const p = await body(["shareIndex", "holderDeviceId", "ciphertextBase64", "contextBase64", "signatureBase64", "idempotencyKey"]);
-          integer(p.shareIndex, 1, 3); uuid(p.holderDeviceId);
-          unbase64(p.ciphertextBase64, 16384); unbase64(p.contextBase64, 4096); unbase64(p.signatureBase64, 80);
-          return respond(await call("share_envelope", { id, ...p }));
-        }
-        if (tail === "my-share" && method === "GET") return respond(await call("my_share", { id }));
-        if (tail === "my-share/ack" && method === "POST") {
-          const p = await body(["envelopeHash", "signatureBase64", "idempotencyKey"]);
-          hash(p.envelopeHash); unbase64(p.signatureBase64, 80);
-          return respond(await call("share_ack", { id, ...p }));
-        }
-      }
-      if (path === "/access-requests" && method === "POST") {
-        const p = await body(["id", "recordingId", "requesterDeviceId", "requestHpkePublicKeysetBase64", "requestBytesBase64", "signatureBase64", "expiresAt", "idempotencyKey"]);
-        uuid(p.id); uuid(p.recordingId); uuid(p.requesterDeviceId); unbase64(p.requestHpkePublicKeysetBase64, 8192); unbase64(p.requestBytesBase64, 4096); unbase64(p.signatureBase64, 80);
-        return respond(await call("access_request", p));
-      }
-      if (path === "/access-requests" && method === "GET") return respond(await call("access_requests"));
-      const access = /^\/access-requests\/([^/]+)(?:\/(.*))?$/.exec(path);
-      if (access) {
-        const requestId = uuid(access[1]), tail = access[2] ?? "";
-        if (tail === "decision" && method === "POST") {
-          const p = await body(["decision", "shareIndex", "releaseCiphertextBase64", "contextBase64", "signatureBase64", "idempotencyKey"]);
-          demand(["approve", "deny"].includes(p.decision)); integer(p.shareIndex, 1, 3); unbase64(p.releaseCiphertextBase64, 16384); unbase64(p.contextBase64, 4096); unbase64(p.signatureBase64, 80);
-          return respond(await call("access_decision", { id: requestId, ...p }));
-        }
-        if (tail === "releases" && method === "GET") return respond(await call("access_releases", { id: requestId }));
-        if (tail === "complete" && method === "POST") return respond(await call("access_complete", { id: requestId, ...(await body(["resultBase64", "signatureBase64"])) }));
-        if (tail === "cancel" && method === "POST") return respond(await call("access_cancel", { id: requestId }));
       }
       throw new ApiError(404, "NOT_FOUND");
     } catch (error) {

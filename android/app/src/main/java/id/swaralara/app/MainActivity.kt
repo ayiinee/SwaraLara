@@ -93,7 +93,6 @@ class MainActivity: ComponentActivity() {
                     }}){Text("Pilih kebijakan pemilik + pemegang")}
                 }
             }
-            OutlinedButton(enabled=!working,onClick={action{val requests=client.accessRequests();status="Inbox akses: ${requests.length()} permintaan."}}){Text("Muat inbox permintaan akses")}
             OutlinedButton(onClick={policy=null;sessions.clear();session=null;links=emptyList();invitation="";status="Keluar. Rekaman dan kunci lokal dipertahankan."}){Text("Keluar")}
         }
         Text(status)
