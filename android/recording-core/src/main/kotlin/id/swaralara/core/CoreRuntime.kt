@@ -16,13 +16,16 @@ import java.util.UUID
 class CoreRuntime private constructor(context: Context) {
     private val app = context.applicationContext
     internal val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val db = Room.databaseBuilder(app, LocalDatabase::class.java,"swaralara-core.db").build()
-    internal val localVault = LocalVault(File(app.filesDir,"recordings"),db,KeyProtector())
+    private val db = Room.databaseBuilder(app, LocalDatabase::class.java,"swaralara-core.db").addMigrations(MIGRATION_1_2).build()
+    private val protector=KeyProtector()
+    val identity=DeviceIdentity(app,protector)
+    internal val localVault = LocalVault(File(app.filesDir,"recordings"),db,protector,identity)
     internal val ready = scope.async { localVault.reconcile() }
     internal val localRecorder = LocalRecorder(app,this)
     val recorder: RecorderController = localRecorder
     val vault: SecureVault = localVault
     val playback: SecurePlaybackController = LocalPlayback(localVault,scope,ready) { !localRecorder.state.value.busy }
+    suspend fun awaitReady() {ready.await()}
     /** Host Activity onStop: release playback buffers/resources; the recording service keeps ownership of capture. */
     fun onHostBackgrounded() { scope.launch { playback.release() } }
     companion object {
@@ -52,7 +55,8 @@ internal class LocalRecorder(private val app: Context, private val core: CoreRun
         mutable.value = RecorderState(CaptureState.STARTING,id)
         try {
             ContextCompat.startForegroundService(app,Intent(app,RecordingService::class.java)
-                .setAction(RecordingService.START).putExtra("id",id.toString()).putExtra("kind",config.kind))
+                .setAction(RecordingService.START).putExtra("id",id.toString()).putExtra("kind",config.kind)
+                .putExtra("cloudPolicy",config.cloudPolicy?.json()))
         } catch (e: Exception) { fail("SERVICE_START_FAILED"); throw e }
         id
     }

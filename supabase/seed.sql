@@ -1,0 +1,2 @@
+-- No production accounts, passwords, private keys, DEKs or shares.
+-- Test users are created through local Auth at runtime; devices prove possession through the API.

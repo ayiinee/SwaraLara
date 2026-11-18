@@ -21,3 +21,7 @@ captures/
 hs_err_pid*.log
 replay_pid*.log
 *.hprof
+node_modules/
+supabase/.temp/
+supabase/.branches/
+.local/

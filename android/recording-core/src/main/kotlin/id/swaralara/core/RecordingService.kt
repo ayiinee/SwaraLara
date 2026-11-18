@@ -50,7 +50,9 @@ class RecordingService : Service() {
         } catch (_: Exception) { core.localRecorder.fail("FOREGROUND_PERMISSION"); stopSelf(); return START_NOT_STICKY }
         val id = try { UUID.fromString(intent.getStringExtra("id")) }
         catch (_: Exception) { core.localRecorder.fail("INVALID_SESSION"); stopSelf(); return START_NOT_STICKY }
-        val config = CaptureConfig(intent.getStringExtra("kind") ?: "retrospective")
+        val config = try { CaptureConfig(intent.getStringExtra("kind") ?: "retrospective",
+            intent.getStringExtra("cloudPolicy")?.let(CloudCapturePolicy::fromJson)) }
+        catch (_:Exception){core.localRecorder.fail("INVALID_POLICY");stopSelf();return START_NOT_STICKY}
         stopping.set(false)
         job = scope.launch { record(id,config) }
         return START_NOT_STICKY // Never reuse a session/key/counter after process death.

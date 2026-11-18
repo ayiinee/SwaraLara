@@ -11,7 +11,8 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
 
-internal class LocalVault(private val root: File, private val db: LocalDatabase, private val protector: KeyProtector) : SecureVault {
+internal class LocalVault(private val root: File, private val db: LocalDatabase, private val protector: KeyProtector,
+    private val identity: DeviceIdentity? = null) : SecureVault {
     private val dao = db.dao()
     private fun directory(id: UUID) = File(root, "$id/segments").apply {
         if (!mkdirs() && !isDirectory) throw java.io.IOException("STORAGE_DIRECTORY")
@@ -21,9 +22,19 @@ internal class LocalVault(private val root: File, private val db: LocalDatabase,
         val key = ByteArray(32).also(SecureRandom()::nextBytes)
         try {
             val wrapped = protector.wrap(id.toString(), key)
+            val policy=config.cloudPolicy
+            val registration=policy?.let {
+                val own=requireNotNull(identity).publicIdentity()
+                require(it.sourceDeviceId==own.deviceId && it.members.first().signingFingerprint==own.signingFingerprint && it.members.first().hpkeFingerprint==own.hpkeFingerprint)
+                val bytes=it.bytes(id)
+                LocalCloudRegistration(id.toString(),it.ownerUserId.toString(),it.json(),encodeBase64(bytes),encodeBase64(identity.sign(bytes)))
+            }
             db.withTransaction {
-                dao.insert(LocalRecording(id.toString(), config.kind, System.currentTimeMillis(), sampleRate = rate))
+                dao.insert(LocalRecording(id.toString(), config.kind, System.currentTimeMillis(), sampleRate = rate,
+                    syncState=if(policy==null) "LOCAL_ONLY" else "QUEUED",recoveryState=if(policy==null) "LOCAL_ONLY" else "DEGRADED",
+                    policyCode=policy?.policyCode ?: "demo_2of3"))
                 dao.key(LocalKeyEnvelope(id.toString(), wrapped))
+                if(registration!=null) dao.cloud(registration)
             }
             return SegmentSession(id, key.copyOf(), rate)
         } finally { key.fill(0) }
@@ -39,6 +50,7 @@ internal class LocalVault(private val root: File, private val db: LocalDatabase,
         db.withTransaction {
             dao.segment(row(target, bytes))
             val rec = requireNotNull(dao.recording(id.toString()))
+            if(rec.policyCode!="demo_2of3") dao.outbox(LocalOutbox(id.toString(),h.index,Segments.hex(Segments.hash(bytes))))
             dao.update(rec.copy(durationSamples = rec.durationSamples + h.sampleCount, segmentCount = rec.segmentCount + 1))
         }
     }
@@ -131,15 +143,40 @@ internal class LocalVault(private val root: File, private val db: LocalDatabase,
     override suspend fun exportEncryptedSnapshot(recordingId: UUID): EncryptedRecordingSnapshot = withContext(Dispatchers.IO) {
         check(inspect(recordingId).passed) { "INVALID_SNAPSHOT" }
         val rec = recording(recordingId)
+        val cloud=dao.cloud(recordingId.toString())
+        val json=cloud?.registrationJson ?: cloud?.let {
+            val text=org.json.JSONObject().put("id",recordingId).put("sourceDeviceId",CloudCapturePolicy.fromJson(it.policyJson).sourceDeviceId)
+                .put("kind",rec.kind).put("policyCode",rec.policyCode).put("sampleRate",rec.sampleRate).put("channels",1).put("pcmEncoding","pcm16le")
+                .put("startedAtDevice",java.time.Instant.ofEpochMilli(rec.startedAtDevice).toString()).put("captureState",rec.captureState.lowercase())
+                .put("totalSegments",rec.segmentCount).put("totalSamples",rec.durationSamples).put("policySnapshotBase64",it.snapshotBase64)
+                .put("policySignatureBase64",it.signatureBase64).toString()
+            dao.registration(recordingId.toString(),text);text
+        }
         EncryptedRecordingSnapshot(recordingId,rec.policyCode, segments = segments(recordingId).map {
             EncryptedSegmentRef(recordingId,it.segmentIndex,File(it.path),it.ciphertextSha256,
                 it.previousSha256,it.byteLength,it.samples)
-        },totalFrames = rec.durationSamples, finalCapture = CaptureState.valueOf(rec.captureState))
+        },totalFrames = rec.durationSamples, finalCapture = CaptureState.valueOf(rec.captureState),cloudRegistrationJson=json,
+            cloudOwnerUserId=cloud?.ownerUserId?.let(UUID::fromString))
     }
-    override suspend fun acknowledgeUpload(receipt: UploadReceipt) {
-        // Demo policy MUST NOT become cloud-synced. M2 requires a real immutable membership snapshot.
-        check(recording(receipt.recordingId).policyCode != "demo_2of3") { "DEMO_CLOUD_FORBIDDEN" }
-        error("CONNECTED_POLICY_NOT_IMPLEMENTED")
+    override suspend fun acknowledgeUpload(receipt: UploadReceipt) = withContext(Dispatchers.IO) {
+        db.withTransaction {
+            val rec=recording(receipt.recordingId)
+            check(rec.policyCode != "demo_2of3" && dao.cloud(rec.id)!=null) { "DEMO_CLOUD_FORBIDDEN" }
+            val segment=segments(receipt.recordingId).single { it.segmentIndex==receipt.index }
+            require(segment.ciphertextSha256==receipt.objectHash && receipt.committedAtServer>0) { "RECEIPT_BINDING" }
+            dao.receipt(rec.id,receipt.index,receipt.committedAtServer);dao.committed(rec.id,receipt.index)
+            val synced=segments(receipt.recordingId).all { it.uploadedAt!=null }
+            dao.update(rec.copy(syncState=if(synced) "SYNCED" else "PARTIAL"))
+            // Full DEK envelope remains. Sync is not holder acknowledgment or threshold recovery.
+        }
+    }
+    override suspend fun markSyncFailure(recordingId: UUID,errorCode: String) = withContext(Dispatchers.IO) {
+        require(errorCode in setOf("AUTH_REQUIRED","NETWORK","CONFLICT","REMOTE"))
+        db.withTransaction {
+            val rec=recording(recordingId);check(rec.policyCode!="demo_2of3")
+            val state=if(errorCode=="AUTH_REQUIRED") "NEEDS_AUTH" else "FAILED"
+            dao.update(rec.copy(syncState=state));dao.failure(rec.id,state,errorCode)
+        }
     }
     internal suspend fun reconcile() = withContext(Dispatchers.IO) {
         for (recording in dao.recordings()) {
@@ -163,7 +200,10 @@ internal class LocalVault(private val root: File, private val db: LocalDatabase,
                         Segments.decryptVerified(key,bytes,id,i.toLong(),previous).fill(0)
                         val existing = indexed[i.toLong()]
                         if (existing != null) require(existing.ciphertextSha256 == Segments.hex(Segments.hash(bytes)))
-                        else { check(canReconcile) { "SEALED_ORPHAN" }; dao.segment(row(f,bytes)) }
+                        else { check(canReconcile) { "SEALED_ORPHAN" }; db.withTransaction {
+                            dao.segment(row(f,bytes))
+                            if(recording.policyCode!="demo_2of3") dao.outbox(LocalOutbox(recording.id,h.index,Segments.hex(Segments.hash(bytes))))
+                        } }
                         previous = Segments.hash(bytes); total += h.sampleCount
                     }
                     require(indexed.keys.all { it < finals.size }) { "MISSING_FINAL" }

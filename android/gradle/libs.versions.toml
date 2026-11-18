@@ -9,6 +9,8 @@ lifecycle = "2.9.0"
 room = "2.7.2"
 coroutines = "1.10.2"
 bc = "1.83"
+tink = "1.17.0"
+work = "2.10.1"
 junit = "4.13.2"
 
 [libraries]
@@ -23,6 +25,8 @@ room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 bc = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bc" }
+tink = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
+work = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 junit = { module = "junit:junit", version.ref = "junit" }
 test-runner = { module = "androidx.test:runner", version = "1.6.2" }
 test-ext = { module = "androidx.test.ext:junit", version = "1.2.1" }

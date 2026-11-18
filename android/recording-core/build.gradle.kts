@@ -25,6 +25,7 @@ dependencies {
     implementation(libs.lifecycle.compose)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.tink)
     ksp(libs.room.compiler)
     testImplementation(libs.junit)
     androidTestImplementation(libs.test.runner)

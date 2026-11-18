@@ -95,3 +95,22 @@ JAR compiler dicocokkan dengan checksum Maven resmi. Hasil langsung ini belum me
 - `118feca` — M1: lifecycle player, penyegaran izin mikrofon dan state penghentian awal.
 - `061108e` — M1: packaging OSGi, batas memori build, izin notifikasi, dan penghentian service.
 - Commit verifikasi/dokumentasi melengkapi skenario instrumented serta laporan ini.
+
+## M2 — checkpoint 18 November 2026
+
+Branch `feat/app-backend` menambahkan migrasi PostgreSQL/RLS, API Supabase dengan
+verifikasi Auth, identitas perangkat dan policy bertanda tangan, undangan trust,
+serta upload ciphertext dan commit terverifikasi. Android menambahkan identitas
+Tink/Keystore, Room v2/outbox, login, trust dan worker sinkronisasi.
+
+Pengujian backend terakhir: **10/10 lulus** (PostgreSQL PGlite dan fixture HTTP
+provider; belum merupakan deployment Supabase penuh). Build core-demo berhasil.
+Build app terakhir tertahan resolusi dependency WorkManager karena DNS Maven;
+APK app M2 dan tes integrasi Android belum dinyatakan lulus. Migrasi Room dan
+regresi emulator masih perlu diuji. Docker/Supabase lokal penuh dan perangkat
+fisik belum tersedia. M3 distribusi share/approval/recovery belum diimplementasikan;
+status recovery cloud tetap degraded dan DEK lokal dipertahankan.
+
+Checkpoint source ini dikomit dan dipush atas permintaan pengguna, lalu pekerjaan
+verifikasi dan dokumentasi M2 dilanjutkan. Konfigurasi lokal, credential, cache,
+artefak build dan data rekaman tetap diabaikan Git.

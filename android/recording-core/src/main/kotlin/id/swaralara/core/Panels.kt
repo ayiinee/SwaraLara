@@ -22,7 +22,8 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import kotlinx.coroutines.*
 
 @Composable
-fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier, holdMillis: Long = 1500) {
+fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier, holdMillis: Long = 1500,
+    captureConfig: CaptureConfig = CaptureConfig()) {
     require(holdMillis > 0)
     val state by controller.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -42,7 +43,8 @@ fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier,
     }
     val notificationLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { notifications = it }
     Column(modifier.padding(16.dp),verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Perlindungan lokal — belum memiliki pemulihan bersama",style = MaterialTheme.typography.titleMedium)
+        Text(if(captureConfig.cloudPolicy==null) "Perlindungan lokal — belum memiliki pemulihan bersama"
+            else "Salinan cloud terenkripsi — pemulihan bersama belum aktif",style = MaterialTheme.typography.titleMedium)
         Text("Gunakan ucapan simulasi. Rekaman dimulai setelah mikrofon aktif.")
         if (!permission) Button(onClick = { launcher.launch(Manifest.permission.RECORD_AUDIO) }) { Text("Izinkan mikrofon") }
         if (!notifications && Build.VERSION.SDK_INT >= 33) {
@@ -53,7 +55,7 @@ fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier,
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth().heightIn(min = 88.dp)
                 .semantics { contentDescription = "Tahan untuk merekam" }
-                .pointerInput(controller, state.busy, permission, holdMillis) {
+                .pointerInput(controller, state.busy, permission, holdMillis,captureConfig) {
                     detectTapGestures(onPress = {
                         if (state.busy || !permission) return@detectTapGestures
                         coroutineScope {
@@ -62,7 +64,7 @@ fun RecorderPanel(controller: RecorderController, modifier: Modifier = Modifier,
                                 delay(holdMillis)
                                 holding = false
                                 scope.launch {
-                                    try { controller.start(); message = null }
+                                    try { controller.start(captureConfig); message = null }
                                     catch (_: Exception) { message = "Perekaman tidak dapat dimulai. Periksa izin dan status mikrofon." }
                                 }
                             }

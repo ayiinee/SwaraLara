@@ -1,0 +1,19 @@
+{
+  "name": "swaralara-backend-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 supabase/tests/*.test.ts",
+    "test:integration": "node --test --test-concurrency=1 supabase/tests/*.test.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.16",
+    "deno": "2.9.6"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.119.0"
+  }
+}

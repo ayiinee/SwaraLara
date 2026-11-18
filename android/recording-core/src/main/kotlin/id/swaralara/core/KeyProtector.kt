@@ -26,7 +26,7 @@ internal class KeyProtector {
         return cipher.iv + cipher.doFinal(raw)
     }
     fun unwrap(id: String, envelope: ByteArray): ByteArray {
-        require(envelope.size == 60)
+        require(envelope.size in 28..65564)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
         cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, envelope.copyOfRange(0,12)))
         cipher.updateAAD("swaralara/local-dek/v1/$id".toByteArray(Charsets.UTF_8))

@@ -6,10 +6,10 @@ import java.io.File
 import java.util.UUID
 
 enum class CaptureState { IDLE, STARTING, RECORDING, STOPPING, SEALED, INTERRUPTED, FAILED }
-enum class SyncState { LOCAL_ONLY, QUEUED, PARTIAL, SYNCED, FAILED }
+enum class SyncState { LOCAL_ONLY, QUEUED, PARTIAL, SYNCED, FAILED, NEEDS_AUTH }
 enum class RecoveryState { LOCAL_ONLY, DEGRADED }
 enum class IntegrityState { UNVERIFIED, VERIFIED_PARTIAL, FAILED }
-data class CaptureConfig(val kind: String = "retrospective") {
+data class CaptureConfig(val kind: String = "retrospective", val cloudPolicy: CloudCapturePolicy? = null) {
     init { require(kind in setOf("retrospective", "live_event")) }
 }
 data class RecorderState(val capture: CaptureState = CaptureState.IDLE, val id: UUID? = null,
@@ -26,7 +26,8 @@ data class EncryptedSegmentRef(val recordingId: UUID, val index: Long, val file:
     val objectHash: String, val previousHash: String, val byteLength: Long, val sampleCount: Int)
 data class EncryptedRecordingSnapshot(val recordingId: UUID, val policyCode: String,
     val formatVersion: Int = 1, val segments: List<EncryptedSegmentRef>, val totalFrames: Long,
-    val finalCapture: CaptureState, val signedManifestAvailable: Boolean = false)
+    val finalCapture: CaptureState, val signedManifestAvailable: Boolean = false,
+    val cloudRegistrationJson: String? = null, val cloudOwnerUserId: UUID? = null)
 data class UploadReceipt(val recordingId: UUID, val index: Long, val objectHash: String, val committedAtServer: Long)
 data class DemoRecoveryResult(val passed: Boolean, val pairsVerified: Int, val message: String)
 enum class PlaybackPhase { IDLE, PREPARING, PREPARED, PLAYING, PAUSED, COMPLETED, FAILED }
@@ -42,6 +43,7 @@ interface SecureVault {
     suspend fun inspect(recordingId: UUID): IntegrityReport
     suspend fun exportEncryptedSnapshot(recordingId: UUID): EncryptedRecordingSnapshot
     suspend fun acknowledgeUpload(receipt: UploadReceipt)
+    suspend fun markSyncFailure(recordingId: UUID, errorCode: String)
     suspend fun demonstrateRecovery(recordingId: UUID): DemoRecoveryResult
     suspend fun testCorruptionOnCopy(recordingId: UUID): Boolean
 }
