@@ -1,0 +1,7 @@
+PASS policy: jvm JCA DER verified; altered payload and trailing signature rejected
+PASS envelope: jvm JCA DER verified; altered payload and trailing signature rejected
+PASS ack: jvm JCA DER verified; altered payload and trailing signature rejected
+PASS request: jvm JCA DER verified; altered payload and trailing signature rejected
+PASS release: jvm JCA DER verified; altered payload and trailing signature rejected
+PASS cancel: jvm JCA DER verified; altered payload and trailing signature rejected
+6 public jvm/WebCrypto signature vectors passed. No private keys or plaintext shares in fixture.

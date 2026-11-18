@@ -64,5 +64,25 @@ Login dan daftarkan perangkat, pasangkan dua akun/perangkat uji melalui undangan
 cocokkan fingerprint kedua pihak lalu pilih policy sebelum merekam. WorkManager
 mengantrekan ciphertext, commit server membuktikan header/hash/chain, dan receipt
 memperbarui status lokal. Saat gagal/token expired, data lokal tetap tersedia.
-HPKE share distribution, approval, signed manifest dan recovery lintas perangkat
-belum aktif; sync cloud tetap recovery degraded dan DEK lokal dipertahankan.
+Distribusi share dan pemulihan inti M3 belum terhubung ke UI/backend;
+sync M2 tetap mempertahankan DEK lokal. Signed manifest/checkpoint M4 belum diimplementasikan.
+
+## Inti M3 — Orang 2
+
+`core.keyExchange` menyediakan pin public key, envelope HPKE bertanda tangan,
+acknowledgment, request/release, pemulihan threshold dan lifecycle kunci.
+Kontrak transport dan batas integrasi ada di [m3-core-contract.md](docs/m3-core-contract.md).
+Fitur ini belum dihubungkan ke layar/API M3 Orang 1. Rekaman legacy tetap dipertahankan.
+
+Tes lokal tanpa emulator/server:
+
+```powershell
+cd android
+.\gradlew.bat :core-crypto:test :recording-core:testDebugUnitTest
+cd ..
+node scripts/verify-m3-signatures.ts
+```
+
+Tes memakai Tink/JCA sebenarnya, tanpa simulasi Android Keystore. Fixture signature
+publik berlabel JVM; tidak berisi private key atau share plaintext. Tes Android M3
+masih menunggu kapasitas emulator/perangkat uji; hasil aktual dicatat di progres.

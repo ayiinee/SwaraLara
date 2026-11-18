@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="id.swaralara.crypto.CryptoTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-11-18T13:26:11" hostname="DESKTOP-77244AT" time="1.396">
+  <properties/>
+  <testcase name="tamperEveryByteTruncateAppendAndWrongKeyRejected" classname="id.swaralara.crypto.CryptoTest" time="0.338"/>
+  <testcase name="uniqueNonceChainAndBinding" classname="id.swaralara.crypto.CryptoTest" time="0.027"/>
+  <testcase name="partialReadsTailAndIncompleteFrame" classname="id.swaralara.crypto.CryptoTest" time="0.035"/>
+  <testcase name="closedSessionCannotReuseKeyNonce" classname="id.swaralara.crypto.CryptoTest" time="0.005"/>
+  <testcase name="allShamirPairsAndCodec" classname="id.swaralara.crypto.CryptoTest" time="0.867"/>
+  <testcase name="headerVectorAndRoundTrip" classname="id.swaralara.crypto.CryptoTest" time="0.12"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

@@ -1,4 +1,4 @@
-# Kontrak core — M1–M2 / format segmen v1
+# Kontrak core — M1–M3 / format segmen v1
 
 Kode otoritatif: `android/recording-core/src/main/kotlin/id/swaralara/core/Contract.kt`.
 Orang 1 hanya mengakses facade dan panel Compose; file/DAO/key adapter bukan API aplikasi utama.
@@ -62,9 +62,18 @@ binding recording/source/owner/policy sebelum memakai snapshot.
 Identitas device memakai signing P-256 Android Keystore dan Tink HPKE X25519/
 HKDF-SHA256/AES256GCM. Private HPKE keyset hanya disimpan Keystore-wrapped.
 `core.identity` memberi public keyset/SPKI/fingerprint dan operasi tanda tangan;
-tidak mengekspos kunci privat. Distribusi envelope dan pemulihan threshold lintas
-perangkat tetap pekerjaan M3. Memori internal library dapat menyalin byte kunci;
+tidak mengekspos kunci privat. M3 menyediakan `core.keyExchange` untuk codec share
+integrated SWB1, HPKE, acknowledgment, request/release dan pemulihan threshold;
+lihat [kontrak M3 Orang 2](m3-core-contract.md). Transport/UI/backend M3 serta
+pengujian perangkat terpisah masih memerlukan integrasi Orang 1.
+Memori internal library dapat menyalin byte kunci;
 zeroization buffer milik aplikasi tidak menjamin seluruh salinan JVM terhapus.
+
+Room v3 memakai migration 1→2→3. Rekaman integrated baru memakai KEK per rekaman
+dan local_dek_v2; local_dek_v1 tetap terbaca dan tidak dihapus otomatis.
+State recovery menambahkan ENVELOPES_QUEUED/ENVELOPES_UPLOADED/HOLDERS_ACKNOWLEDGED;
+integrity KEY_REQUIRED berarti perlu pembukaan threshold, bukan file dianggap rusak.
+Host tetap memanggil `onHostBackgrounded()` agar playback dan lease key ditutup.
 
 Fixture handoff [fixtures/synthetic-segments-v1.json](fixtures/synthetic-segments-v1.json) berisi dua objek
 SWL1 dari PCM nol sintetis (11 frame total), hash, previousHash, ukuran dan base64 bytes.

@@ -1,6 +1,6 @@
 # Progres SwaraLara — 18 November 2026
 
-Branch task saat ini: `feat/app-backend`, berangkat dari hasil M1 di `feat/recording-crypto`.
+Branch task saat ini: `feat/m3-hpke-recovery`, berangkat dari hasil M2 `81fd2a3` di `feat/app-backend`.
 Checkpoint `9bc6609` sudah dipush ke GitHub atas permintaan pengguna; tidak ada deployment hosted.
 
 ## Status milestone
@@ -10,7 +10,8 @@ Checkpoint `9bc6609` sudah dipush ke GitHub atas permintaan pengguna; tidak ada 
 | M0 | Empat modul Android/JVM, version catalog, wrapper terverifikasi, scaffold host utama | APK debug demo dan app berhasil dihasilkan; 6 test Gradle crypto lulus |
 | M1 | Crypto, recorder/service, panel gestur/izin, Room/Keystore, file atomik/recovery, brankas demo, Shamir lokal, verifikasi dan AudioTrack | **Alur utama lulus pada emulator Android 15**; 6 test vault + 1 test UI, force-stop dan cabut izin diperiksa. Perangkat fisik dan skenario lanjutan belum diuji |
 | M2 | Migration/RLS, API Auth/device/trust/recording/upload/commit/audit, private bucket, signed policy, Room v2/outbox dan WorkManager terintegrasi | **Alur lokal Android→HTTP API→PostgreSQL lulus**, 12 tes backend + 10 Android. Supabase Auth/Storage/Edge Runtime asli belum diuji karena Docker/CLI belum tersedia; gate provider masih terbuka |
-| M3–M4 | Public identity HPKE/signing dan pairing minimum tersedia untuk M2; distribusi share/approval/manifest belum diimplementasikan | Pemulihan lintas perangkat, signed final manifest/checkpoint dan penguatan perangkat belum diuji |
+| M3 — core Orang 2 | Codec SWB1, HPKE envelope+signature, pin/offline cache, ack, request-specific HPKE/release, threshold recovery dan lifecycle v2 tersedia melalui facade | 15 tes JVM + 6 vektor signature Node/Deno lulus. Suite Android disiapkan/di-build, belum dijalankan karena commit memory emulator kurang; pengguna memilih lanjut tanpa emulator. UI/API/transport M3 Orang 1 dan beberapa perangkat tetap terbuka |
+| M4 | Belum diimplementasikan | Signed final manifest/checkpoint, kronologi terenkripsi dan penguatan perangkat masih terbuka |
 
 ## Fitur yang telah ditulis
 
