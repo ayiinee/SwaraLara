@@ -1,19 +1,24 @@
 import {
   ApiError,
   b64,
+  bytesHex,
+  decodeLp,
   decodePolicy,
   demand,
   deviceProof,
+  encodeLp,
   fields,
   hash,
   integer,
   label,
+  parseAction,
   segment,
   sha,
   strictJson,
   trustProof,
   unbase64,
   uuid,
+  uuidAt,
   validateHpkePublic,
   verify,
 } from "./protocol.ts";
@@ -345,13 +350,224 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             expiresInSeconds: 60,
           });
         }
-        // M3/M4 workflows are intentionally not substituted with approval/decrypt stubs.
-        if (
-          ["manifest", "notes", "share-envelopes", "my-share", "my-share/ack"]
-            .includes(tail)
-        ) {
+        if (tail === "share-envelopes" && method === "POST") {
+          await rate("upload");
+          const rec = await call("owner", { id });
+          const d = await call("device", { id: rec.source_device_id });
+          const p = await body(["envelopes"]);
+          demand(Array.isArray(p.envelopes) && p.envelopes.length > 0);
+          for (const env of p.envelopes) {
+            fields(env, [
+              "shareIndex",
+              "holderDeviceId",
+              "schemeVersion",
+              "envelopeCiphertextBase64",
+              "contextBytesBase64",
+              "ownerSignatureBase64",
+              "ciphertextSha256",
+            ]);
+            demand(env.schemeVersion === "shamir-bc-gf256-v1");
+            integer(env.shareIndex, 1, 3);
+            uuid(env.holderDeviceId);
+            hash(env.ciphertextSha256);
+            const cipher = unbase64(env.envelopeCiphertextBase64, 16384);
+            demand(await sha(cipher) === env.ciphertextSha256);
+            const ctx = unbase64(env.contextBytesBase64, 4096);
+            const sigPayload = encodeLp(
+              "swaralara/share-envelope-signature/v1",
+              ctx,
+              bytesHex(env.ciphertextSha256),
+            );
+            await verify(
+              unbase64(d.signingBase64.replace(/\s/g, "")),
+              sigPayload,
+              unbase64(env.ownerSignatureBase64, 80),
+            );
+          }
+          return respond(
+            await call("envelopes_create", {
+              recordingId: id,
+              envelopes: p.envelopes,
+            }),
+          );
+        }
+        if (tail === "my-share" && method === "GET") {
+          const deviceId = uuid(
+            new URL(request.url).searchParams.get("deviceId"),
+          );
+          const actionBase64 = new URL(request.url).searchParams.get(
+            "actionBase64",
+          );
+          const signatureBase64 = new URL(request.url).searchParams.get(
+            "signatureBase64",
+          );
+          if (actionBase64 && signatureBase64) {
+            const actBytes = unbase64(actionBase64, 1024);
+            const act = parseAction(actBytes);
+            demand(
+              act.action === "my_share" && act.recordingId === id &&
+                act.deviceId === deviceId,
+            );
+            const dev = await call("device", { id: deviceId });
+            await verify(
+              unbase64(dev.signingBase64.replace(/\s/g, "")),
+              actBytes,
+              unbase64(signatureBase64, 80),
+            );
+          } else {
+            await call("device", { id: deviceId });
+          }
+          return respond(await call("my_share", { recordingId: id, deviceId }));
+        }
+        if (tail === "my-share/ack" && method === "POST") {
+          await rate("request");
+          const p = await body([
+            "deviceId",
+            "actionBytesBase64",
+            "signatureBase64",
+          ]);
+          uuid(p.deviceId);
+          const actBytes = unbase64(p.actionBytesBase64, 1024);
+          const act = parseAction(actBytes);
+          demand(
+            act.action === "share_ack" && act.recordingId === id &&
+              act.deviceId === p.deviceId,
+          );
+          const dev = await call("device", { id: p.deviceId });
+          await verify(
+            unbase64(dev.signingBase64.replace(/\s/g, "")),
+            actBytes,
+            unbase64(p.signatureBase64, 80),
+          );
+          return respond(
+            await call("my_share_ack", {
+              recordingId: id,
+              deviceId: p.deviceId,
+              ackSignatureBase64: p.signatureBase64,
+            }),
+          );
+        }
+        // M4 workflows: signed final manifest and encrypted notes
+        if (["manifest", "notes"].includes(tail)) {
           await call("owner", { id });
           throw new ApiError(501, "MILESTONE_NOT_IMPLEMENTED");
+        }
+      }
+      if (path === "/access-requests" && method === "POST") {
+        await rate("request");
+        const p = await body([
+          "id",
+          "recordingId",
+          "requesterDeviceId",
+          "requestHpkePublicKeysetBase64",
+          "requestBytesBase64",
+          "requestSignatureBase64",
+          "expiresAt",
+        ]);
+        uuid(p.id);
+        uuid(p.recordingId);
+        uuid(p.requesterDeviceId);
+        demand(
+          typeof p.expiresAt === "string" &&
+            Number.isFinite(Date.parse(p.expiresAt)),
+        );
+        const reqBytes = unbase64(p.requestBytesBase64, 2048);
+        const reqFields = decodeLp(reqBytes);
+        demand(reqFields.length === 9, "MALFORMED_REQUEST");
+        demand(
+          new TextDecoder("ascii").decode(reqFields[0]) ===
+            "swaralara/key-request/v1",
+          "INVALID_DOMAIN",
+        );
+        demand(uuidAt(reqFields[1], 0) === p.id);
+        demand(uuidAt(reqFields[2], 0) === p.recordingId);
+        demand(uuidAt(reqFields[3], 0) === p.requesterDeviceId);
+        const dev = await call("device", { id: p.requesterDeviceId });
+        await verify(
+          unbase64(dev.signingBase64.replace(/\s/g, "")),
+          reqBytes,
+          unbase64(p.requestSignatureBase64, 80),
+        );
+        return respond(await call("request_create", p));
+      }
+      if (path === "/access-requests" && method === "GET") {
+        return respond(await call("request_list"));
+      }
+      match = /^\/access-requests\/([^/]+)(?:\/(.*))?$/.exec(path);
+      if (match) {
+        const id = uuid(match[1]), tail = match[2] ?? "";
+        if (!tail && method === "GET") {
+          return respond(await call("request_detail", { id }));
+        }
+        if (tail === "decision" && method === "POST") {
+          await rate("decision");
+          const p = await body([
+            "decision",
+            "holderDeviceId",
+            "shareIndex",
+            "signedDecisionBase64",
+            "decisionSignatureBase64",
+            "releaseCiphertextBase64",
+            "contextBytesBase64",
+            "holderSignatureBase64",
+            "ciphertextSha256",
+          ]);
+          demand(["approve", "deny"].includes(p.decision));
+          uuid(p.holderDeviceId);
+          integer(p.shareIndex, 1, 3);
+          const dev = await call("device", { id: p.holderDeviceId });
+          const decBytes = unbase64(p.signedDecisionBase64, 2048);
+          await verify(
+            unbase64(dev.signingBase64.replace(/\s/g, "")),
+            decBytes,
+            unbase64(p.decisionSignatureBase64, 80),
+          );
+          if (p.decision === "approve") {
+            demand(
+              p.releaseCiphertextBase64 && p.contextBytesBase64 &&
+                p.holderSignatureBase64 && p.ciphertextSha256,
+            );
+            hash(p.ciphertextSha256);
+            const relCipher = unbase64(p.releaseCiphertextBase64, 16384);
+            demand(await sha(relCipher) === p.ciphertextSha256);
+            const ctxBytes = unbase64(p.contextBytesBase64, 4096);
+            const sigPayload = encodeLp(
+              "swaralara/share-release-signature/v1",
+              ctxBytes,
+              bytesHex(p.ciphertextSha256),
+            );
+            await verify(
+              unbase64(dev.signingBase64.replace(/\s/g, "")),
+              sigPayload,
+              unbase64(p.holderSignatureBase64, 80),
+            );
+          }
+          return respond(await call("request_decision", { id, ...p }));
+        }
+        if (tail === "releases" && method === "GET") {
+          return respond(await call("request_releases", { id }));
+        }
+        if (tail === "cancel" && method === "POST") {
+          await rate("request");
+          const p = await body([
+            "deviceId",
+            "actionBytesBase64",
+            "signatureBase64",
+          ]);
+          uuid(p.deviceId);
+          const actBytes = unbase64(p.actionBytesBase64, 1024);
+          const act = parseAction(actBytes);
+          demand(
+            act.action === "request_cancel" && act.resourceId === id &&
+              act.deviceId === p.deviceId,
+          );
+          const dev = await call("device", { id: p.deviceId });
+          await verify(
+            unbase64(dev.signingBase64.replace(/\s/g, "")),
+            actBytes,
+            unbase64(p.signatureBase64, 80),
+          );
+          return respond(await call("request_cancel", { id }));
         }
       }
       throw new ApiError(404, "NOT_FOUND");

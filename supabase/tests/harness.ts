@@ -19,6 +19,7 @@ export async function database() {
     const file of [
       "202611180001_foundation.sql",
       "202611180002_m2_transactions.sql",
+      "202611180003_m3_transactions.sql",
     ]
   ) {
     await db.exec(

@@ -380,3 +380,85 @@ export function strictJson(text: string): any {
     throw new ApiError(400, "INVALID_JSON");
   }
 }
+export function decodeLp(bytes: Uint8Array): Uint8Array[] {
+  const result: Uint8Array[] = [];
+  let offset = 0;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  while (offset < bytes.length) {
+    demand(offset + 4 <= bytes.length, "MALFORMED_LP");
+    const n = view.getUint32(offset, false);
+    offset += 4;
+    demand(n <= 8192 && offset + n <= bytes.length, "MALFORMED_LP");
+    result.push(bytes.subarray(offset, offset + n));
+    offset += n;
+  }
+  return result;
+}
+export function encodeLp(domain: string, ...parts: Uint8Array[]): Uint8Array {
+  const all = [new TextEncoder().encode(domain), ...parts];
+  const total = all.reduce((acc, p) => acc + 4 + p.length, 0);
+  const out = new Uint8Array(total);
+  const view = new DataView(out.buffer);
+  let offset = 0;
+  for (const p of all) {
+    demand(p.length <= 8192, "LP_FIELD_TOO_LARGE");
+    view.setUint32(offset, p.length, false);
+    offset += 4;
+    out.set(p, offset);
+    offset += p.length;
+  }
+  return out;
+}
+export function parseAction(bytes: Uint8Array): {
+  action: string;
+  recordingId: string;
+  resourceId: string;
+  deviceId: string;
+  policyHash: string;
+  objectHash: string;
+  issuedAt: number;
+  expiresAt: number;
+  nonce: string;
+} {
+  const f = decodeLp(bytes);
+  demand(f.length === 10, "MALFORMED_ACTION");
+  demand(
+    new TextDecoder("ascii").decode(f[0]) === "swaralara/device-action/v1",
+    "INVALID_DOMAIN",
+  );
+  const action = new TextDecoder("ascii").decode(f[1]);
+  demand(
+    ["share_ack", "request_cancel", "my_share", "release_list"].includes(
+      action,
+    ),
+    "INVALID_ACTION",
+  );
+  demand(
+    f[2].length === 16 && f[3].length === 16 && f[4].length === 16,
+    "INVALID_UUID",
+  );
+  demand(f[5].length === 32 && f[6].length === 32, "INVALID_HASH");
+  demand(f[7].length === 8 && f[8].length === 8, "INVALID_TIME");
+  demand(f[9].length === 16, "INVALID_NONCE");
+  const v7 = new DataView(f[7].buffer, f[7].byteOffset, 8);
+  const v8 = new DataView(f[8].buffer, f[8].byteOffset, 8);
+  const issuedAt = Number(v7.getBigInt64(0, false));
+  const expiresAt = Number(v8.getBigInt64(0, false));
+  const now = Date.now();
+  demand(
+    issuedAt > 0 && expiresAt > issuedAt && expiresAt - issuedAt <= 900000,
+    "EXPIRED_ACTION",
+  );
+  demand(issuedAt <= now + 30000 && now < expiresAt, "EXPIRED_ACTION");
+  return {
+    action,
+    recordingId: uuidAt(f[2], 0),
+    resourceId: uuidAt(f[3], 0),
+    deviceId: uuidAt(f[4], 0),
+    policyHash: hex(f[5]),
+    objectHash: hex(f[6]),
+    issuedAt,
+    expiresAt,
+    nonce: uuidAt(f[9], 0),
+  };
+}

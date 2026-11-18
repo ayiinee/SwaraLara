@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test --test-concurrency=1 supabase/tests/*.test.ts",
+    "test:deno": "deno test --no-check --allow-all supabase/tests/*.test.ts",
     "test:integration": "node --test --test-concurrency=1 supabase/tests/*.test.ts"
   },
   "engines": {
