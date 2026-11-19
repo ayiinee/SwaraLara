@@ -1,0 +1,15 @@
+[
+  {
+    "path": "/rest/v1/recordings?select=id",
+    "status": 403
+  },
+  {
+    "path": "/rest/v1/rpc/swl_m2",
+    "status": 403
+  },
+  {
+    "path": "/storage/v1/object/list/swl-recordings",
+    "status": 200,
+    "empty": true
+  }
+]

@@ -73,6 +73,17 @@ test("unauthenticated/expired token and forged actor body fail closed", async ()
     new Request("http://localhost/functions/v1/api/health"),
   );
   assert.equal(health.status, 200);
+  // Hosted Edge Runtime forwards /api/...; fixtures can retain the gateway prefix.
+  for (const path of ["/api/health", "/health"]) {
+    assert.equal(
+      (await h.api(new Request(`http://localhost${path}`))).status,
+      200,
+    );
+  }
+  assert.equal(
+    (await h.api(new Request("http://localhost/api-extra/health"))).status,
+    401,
+  );
 });
 test("device proof rejects altered key, private keyset and device ownership takeover", async () => {
   const d = await identity();

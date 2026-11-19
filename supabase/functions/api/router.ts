@@ -44,7 +44,7 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
       });
     try {
       const path = new URL(request.url).pathname.replace(
-        /^\/functions\/v1\/api/,
+        /^\/(?:functions\/v1\/)?api(?=\/|$)/,
         "",
       );
       const method = request.method;

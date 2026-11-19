@@ -16,8 +16,8 @@ import org.junit.runner.RunWith
 
 /**
  * Real Tink/Keystore, three isolated identities, production Android HTTP client and production
- * Edge/SQL. Auth/Storage use the explicitly test-only local fixture, not hosted Supabase or three
- * physical phones.
+ * Edge/SQL. Credentials select either the local fixture or temporary hosted Supabase accounts.
+ * Three isolated identities run on one physical phone.
  */
 @RunWith(AndroidJUnit4::class)
 class M3TransportIntegrationTest {
@@ -145,9 +145,9 @@ class M3TransportIntegrationTest {
     @Test
     fun ownerRequiredAndTwoOfThreeRecoverOverProductionTransport() = runBlocking {
         try {
-            val owner = actor("owner@test.local")
-            val a = actor("holder@test.local")
-            val b = actor("outsider@test.local")
+            val owner = actor(args.getString("ownerEmail") ?: "owner@test.local")
+            val a = actor(args.getString("holderEmail") ?: "holder@test.local")
+            val b = actor(args.getString("otherEmail") ?: "outsider@test.local")
             pair(owner, a)
             pair(owner, b)
             val two = recording(owner, listOf(owner, a), "owner_required_2of2")

@@ -103,6 +103,7 @@ node scripts/verify-m3-signatures.ts
 
 Tes memakai Tink/JCA sebenarnya, tanpa simulasi Android Keystore. Fixture signature
 publik berlabel JVM; tidak berisi private key atau share plaintext. Pengujian integrasi Android M3 memakai
-perangkat fisik ADB melalui `scripts/verify-m3-android.ps1`. Supabase hosted sengaja
-ditunda sampai pengguna menyiapkan environment; hasil fixture tidak menggantikan
-validasi provider atau beberapa ponsel fisik.
+perangkat fisik ADB melalui `scripts/verify-m3-android.ps1`. Supabase hosted juga sudah
+dideploy dan lulus tes M3 melalui Auth/Edge/PostgreSQL/Storage asli pada satu ponsel
+dengan tiga identitas terisolasi. Pengujian beberapa ponsel independen masih terbuka;
+lihat [hasil hosted M3](docs/m3-integration.md). Docker/emulator tidak dijalankan.

@@ -13,7 +13,11 @@ satu ponsel fisik lulus untuk dua kebijakan, retry, retirement, import, pemutara
 klip pendek, dan cancellation melalui koordinator worker. Android lint 0 error,
 5 warning; Deno typecheck/lint lulus.
 
-Supabase hosted sengaja ditunda atas permintaan pengguna sampai environment tersedia.
+Setelah environment tersedia, lima migration dan function `api` sudah dideploy ke
+Supabase hosted. Tes Android produksi terhadap Auth/Edge/PostgreSQL/Storage asli
+lulus dalam 155,903 detik menggunakan tiga akun sementara pada satu ponsel fisik.
+16/16 tabel RLS; akses langsung tabel/RPC oleh authenticated ditolak. Regresi
+routing hosted diperbaiki dan suite backend ulang lulus 29/29 kasus.
 Tidak ada Docker/emulator yang dijalankan untuk task M3 ini. Pengujian beberapa
 ponsel fisik dan M4 tetap terpisah. Gunakan [panduan M3](m3-integration.md) dan
 [log aktual](test-results/2026-11-19/m3/).

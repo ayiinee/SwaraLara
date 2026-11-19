@@ -1,0 +1,9 @@
+
+id.swaralara.app.M3TransportIntegrationTest:.
+
+Time: 155,903
+
+OK (1 test)
+
+
+

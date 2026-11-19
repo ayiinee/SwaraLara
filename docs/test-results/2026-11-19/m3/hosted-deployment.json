@@ -1,0 +1,35 @@
+{
+  "migration_versions": [
+    "202611180001",
+    "202611180002",
+    "202611180003",
+    "202611190004",
+    "202611190005"
+  ],
+  "rls": [
+    {
+      "tables": 16,
+      "enabled": 16
+    }
+  ],
+  "rpc": [
+    {
+      "anon_execute": false,
+      "authenticated_execute": false,
+      "service_execute": true
+    }
+  ],
+  "storage_bucket": [
+    {
+      "public": false,
+      "file_size_limit": 384098
+    }
+  ],
+  "function": [
+    {
+      "slug": "api",
+      "status": "ACTIVE",
+      "verify_jwt": false
+    }
+  ]
+}
