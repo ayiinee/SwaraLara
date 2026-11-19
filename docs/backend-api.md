@@ -54,13 +54,57 @@ Konfirmasi trust: `SWT1 || linkUUID || deviceUUID`. Encoding UUID dan SWP1 mengi
 [kontrak core](core-contract.md). Fingerprint dibandingkan melalui saluran terpisah
 sebelum tombol konfirmasi, lalu dipin di Android.
 
-RLS aktif pada 15 tabel; akses langsung anon/authenticated dan execute RPC
+RLS aktif pada 16 tabel (termasuk nonce request M3); akses langsung anon/authenticated dan execute RPC
 `swl_m2` dicabut. Service role hanya tersedia server. Kebijakan restrictive
 bucket mencegah policy permisif yang tidak terkait membuka objek rekaman.
 Transaksi memeriksa actor/resource lagi. Rate limit per actor/menit: 10 untuk
 device/invitation/accept, 60 untuk recording/upload/read; upload-url dan commit
 menggunakan kuota upload yang sama. Client retry dengan backoff.
 
-M3/M4: manifest, notes, share-envelopes, my-share/ack mengembalikan 501 sesudah
-otorisasi owner; workflow akses lainnya belum memiliki route. Tabel target
-tersedia sebagai fondasi, bukan bukti workflow approval/recovery sudah bekerja.
+M3 memiliki route share-envelopes, my-share/ack, access-requests, decision,
+releases dan cancel. M4 manifest/notes tetap 501. API/M3 diuji pada PGlite dan
+HTTP fixture; belum merupakan hasil Supabase live atau integrasi multi-perangkat.
+
+Penguatan 19 November memakai migrasi `202611190004_m3_security.sql` setelah tiga
+migrasi sebelumnya. Nonce request unik per perangkat, retry ID harus identik,
+expiry mengikat payload bertanda tangan (maksimum 15 menit), keputusan dan release
+harus mengikat request/index/holder/policy. Cancel requester menutup pending maupun
+ready; release read dan keputusan menolak request expired. Retry keputusan holder
+yang sama tidak menambah jumlah bagian. Request expiry tidak mencabut bagian yang
+sudah diterima client.
+
+`GET my-share` dan `GET access-requests/:id/releases` wajib memakai query
+`actionBase64` dan `signatureBase64`, dengan LP device-action dari M3Wire.
+My-share juga membawa `deviceId`; action=my_share, resourceId=recordingId,
+objectHash=policyHash. Release read action=release_list, resourceId=requestId,
+objectHash=SHA256(requestSignedBytes), expiry sama dengan request. JWT akun saja
+tidak menggantikan signature perangkat. Ack mengikat hash ciphertext envelope dan
+policy. JSON/base64 publik harus canonical. Signed decision saat ini menggunakan
+ASCII `approve:<requestId>:<shareIndex>` atau `deny:<requestId>:<shareIndex>`;
+transport Android memakai `M3TransportCodec` untuk mempertahankan bytes asli.
+`M3Json` tetap khusus persistence lokal, bukan DTO HTTP.
+
+Migration `202611190005_m3_transport.sql` melengkapi kontrak transport:
+
+| Route | Response / otorisasi tambahan |
+|---|---|
+| `GET /trust` | Identitas publik owner/holder beserta proof SWD2 asli; hanya kedua pihak |
+| `GET /m3/recordings?deviceId=...` | Snapshot dan metadata rekaman yang mencantumkan akun/perangkat tersebut |
+| `GET /recordings/:id/members` | Public keyset/SPKI/proof anggota snapshot; hanya anggota |
+| `POST /recordings/:id/share-envelopes` | `{uploadedCount, receipts:[{recordingId,shareIndex,ciphertextHash,receivedAtServer}]}` |
+| `GET /recordings/:id/acknowledgments` | `{payloadBase64,signatureBase64}[]`, bytes ack asli; hanya owner |
+| `GET /access-requests/:id/recording` | Metadata download, hanya requester pada state ready dengan signed action release_list |
+| `GET /access-requests/:id/segments?offset=0` | Maksimum 50 referensi segmen + signed URL; gate sama dengan releases |
+
+Query download memakai `actionBase64`/`signatureBase64` yang sama dengan release
+read. Offset 0..100000; setiap segmen memuat index, objectHash, previousHash,
+byteLength, sampleCount dan readUrl. Klien memeriksa hash/binding sebelum import;
+core tetap memerlukan GCM dengan DEK hasil threshold recovery. Ini bukan final manifest M4.
+
+Ack POST memakai `{deviceId,actionBytesBase64,signatureBase64}`. Cancel POST memakai
+struktur yang sama dan bytes-nya dikembalikan sebagai `cancellation` pada detail
+request. Retry keputusan identik mengembalikan keputusan tersimpan tanpa menambah
+share; perubahan keputusan/release pada index yang sama ditolak. Server tidak
+mengubah expiry/keyset/bytes request setelah ditandatangani.
+
+Alur, konfigurasi dan batas pengujian: [integrasi M3](m3-integration.md).

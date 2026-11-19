@@ -1,4 +1,25 @@
-# Progres SwaraLara — 18 November 2026
+# Progres SwaraLara
+
+## Pembaruan 19 November 2026 — integrasi M3
+
+M3 menghubungkan klien Android, worker, core dan API untuk proof/pinning perangkat,
+roster bertanda tangan, distribusi HPKE, receipt/ack asli, request persisten,
+persetujuan/penolakan eksplisit, cancellation, download/import ciphertext,
+retirement DEK dengan consent dan pemulihan/AudioTrack tanpa fallback kunci lokal.
+
+Validasi aktual: 28 tes backend + 1 regresi deny tambahan lulus; 8 tes core-crypto
+serta 7 tes M3 JVM standar lulus. Tes integrasi Android dengan tiga identitas pada
+satu ponsel fisik lulus untuk dua kebijakan, retry, retirement, import, pemutaran
+klip pendek, dan cancellation melalui koordinator worker. Android lint 0 error,
+5 warning; Deno typecheck/lint lulus.
+
+Supabase hosted sengaja ditunda atas permintaan pengguna sampai environment tersedia.
+Tidak ada Docker/emulator yang dijalankan untuk task M3 ini. Pengujian beberapa
+ponsel fisik dan M4 tetap terpisah. Gunakan [panduan M3](m3-integration.md) dan
+[log aktual](test-results/2026-11-19/m3/).
+
+## Catatan historis 18 November 2026
+
 
 Branch task saat ini: `feat/m3-hpke-recovery`, berangkat dari hasil M2 `81fd2a3` di `feat/app-backend`.
 Checkpoint `9bc6609` sudah dipush ke GitHub atas permintaan pengguna; tidak ada deployment hosted.

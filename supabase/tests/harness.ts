@@ -20,6 +20,8 @@ export async function database() {
       "202611180001_foundation.sql",
       "202611180002_m2_transactions.sql",
       "202611180003_m3_transactions.sql",
+      "202611190004_m3_security.sql",
+      "202611190005_m3_transport.sql",
     ]
   ) {
     await db.exec(

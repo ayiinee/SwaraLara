@@ -74,6 +74,10 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
     var accessRequests by remember { mutableStateOf<List<KeyAccessRequest>>(emptyList()) }
     // M3: requestId aktif per recordingId (untuk pemulihan DEK)
     var activeRequestIds by remember { mutableStateOf<Map<UUID, UUID>>(emptyMap()) }
+    var remoteRecordings by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
+    var requestStates by remember { mutableStateOf<Map<UUID, String>>(emptyMap()) }
+    var retireId by remember { mutableStateOf<UUID?>(null) }
+    var recoveryHolders by remember { mutableStateOf<Set<String>>(emptySet()) }
 
     val recordingFlow =
         remember(core) {
@@ -108,6 +112,7 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
     suspend fun refresh() {
         val a = client!!.links()
         links = (0 until a.length()).map { a.getJSONObject(it) }
+        client.pinConfirmedLinks(core)
     }
 
     // M3: LaunchedEffect — trigger workers saat login & rekaman berubah
@@ -130,6 +135,7 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
 
             // M3: poll RecoveryWorker sekali saat login (KEEP — tidak duplikat)
             RecoveryWorker.enqueueOnce(context)
+            RecoveryWorker.schedule(context)
         }
     }
 
@@ -142,6 +148,54 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
     val playback by core.playback.state.collectAsStateWithLifecycle()
     val selectedRecording = recordings.firstOrNull { it.id.toString() == recordingId }
     val selectedRequest = accessRequests.firstOrNull { it.requestId.toString() == requestId }
+    suspend fun refreshM3() {
+        remoteRecordings = M3Sync.refresh(core, client!!)
+        val local = core.keyExchange.pendingRequests()
+        val rows = client.requestRows()
+        requestStates =
+            rows.associate { UUID.fromString(it.getString("id")) to it.getString("state") }
+        activeRequestIds =
+            local
+                .filter { requestStates[it.requestId] in setOf(null, "pending", "ready") }
+                .associate { it.recordingId to it.requestId }
+        for (request in local) {
+            if (requestStates[request.requestId] == null) client.createAccessRequest(request)
+            if (
+                requestStates[request.requestId] in
+                    setOf("denied", "expired", "cancelled", "completed")
+            )
+                core.keyExchange.closeRecovery(request.requestId)
+        }
+        accessRequests = client.getAccessRequests(core.identity.publicIdentity().deviceId)
+    }
+    suspend fun requestRecovery(packet: SignedPolicyPackage) {
+        val id = M3TransportCodec.recordingId(packet)
+        val request =
+            core.keyExchange.pendingRequests().firstOrNull { it.recordingId == id }
+                ?: core.keyExchange.createRequest(packet)
+        activeRequestIds = activeRequestIds + (id to request.requestId)
+        client!!.createAccessRequest(request)
+        requestStates =
+            requestStates +
+                (request.requestId to client.requestDetail(request.requestId).getString("state"))
+        status =
+            "Permintaan dibuat. Setiap pemegang, termasuk peminta, harus menyetujui secara eksplisit."
+    }
+    suspend fun recoverRecording(requestId: UUID) {
+        val auth = core.keyExchange.authorizeReleasesRead(requestId)
+        client!!.downloadForRecovery(core, requestId, auth)
+        val result = core.keyExchange.recover(requestId, client.getReleases(requestId, auth))
+        status = result.message
+        if (result.passed) {
+            tabName = Destination.VAULT.name
+            recordingId =
+                core.keyExchange
+                    .pendingRequests()
+                    .first { it.requestId == requestId }
+                    .recordingId
+                    .toString()
+        }
+    }
     val snackbar = remember { SnackbarHostState() }
     val pageScroll = rememberScrollState()
     val clipboard = LocalClipboardManager.current
@@ -149,7 +203,7 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
     LaunchedEffect(tabName, session?.userId) {
         if (client != null && session != null) {
             if (tab == Destination.DEVICES) action { refresh() }
-            if (tab == Destination.ACCESS) action { accessRequests = client.getAccessRequests() }
+            if (tab == Destination.ACCESS) action { refreshM3() }
         }
     }
     LaunchedEffect(status) {
@@ -181,15 +235,22 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
             } else client!!.submitDecision(req, core.identity, null)
             accessRequests = accessRequests.filterNot { it.requestId == req.requestId }
             requestId = null
+            requestStates =
+                requestStates +
+                    (req.requestId to (client!!.requestDetail(req.requestId).getString("state")))
             status = if (approved) "Persetujuan dikirim." else "Permintaan ditolak."
         }
     }
     if (capture.busy) {
         RecordingScreen(capture) {
             scope.launch {
-                try { core.recorder.stop() }
-                catch (e: CancellationException) { throw e }
-                catch (_: Exception) { status = "Gunakan tombol berhenti pada notifikasi jika rekaman belum berhenti." }
+                try {
+                    core.recorder.stop()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    status = "Gunakan tombol berhenti pada notifikasi jika rekaman belum berhenti."
+                }
             }
         }
     } else
@@ -269,37 +330,59 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                                 },
                                 Modifier.padding(top = 20.dp),
                             )
-                        if (r.recovery == RecoveryState.HOLDERS_ACKNOWLEDGED) {
+                        if (
+                            r.recovery == RecoveryState.HOLDERS_ACKNOWLEDGED ||
+                                activeRequestIds.containsKey(r.id)
+                        ) {
                             val existing = activeRequestIds[r.id]
                             Pill(
                                 if (existing == null) "Minta pemulihan" else "Pulihkan rekaman",
                                 {
                                     requireAccount {
-                                        if (existing == null) {
-                                            val request =
-                                                core.keyExchange.createRequest(
-                                                    core.keyExchange.exportPolicy(r.id)
-                                                )
-                                            activeRequestIds =
-                                                activeRequestIds +
-                                                    (r.id to client!!.createAccessRequest(request))
-                                            status = "Permintaan pemulihan dibuat."
-                                        } else {
-                                            val auth =
-                                                core.keyExchange.authorizeReleasesRead(existing)
-                                            status =
-                                                core.keyExchange
-                                                    .recover(
-                                                        existing,
-                                                        client!!.getReleases(existing, auth),
-                                                    )
-                                                    .message
-                                        }
+                                        if (existing == null)
+                                            requestRecovery(core.keyExchange.exportPolicy(r.id))
+                                        else recoverRecording(existing)
                                     }
                                 },
                                 Modifier.padding(top = 20.dp),
-                                enabled = !working,
+                                enabled =
+                                    !working &&
+                                        (existing == null || requestStates[existing] == "ready"),
                             )
+                            if (existing != null) {
+                                Text(
+                                    "Status permintaan: ${requestStates[existing] ?: "menunggu sinkronisasi"}",
+                                    color = Muted,
+                                )
+                                Pill(
+                                    "Muat status",
+                                    { requireAccount { refreshM3() } },
+                                    enabled = !working,
+                                )
+                                Pill(
+                                    "Batalkan permintaan",
+                                    {
+                                        requireAccount {
+                                            client!!.cancelRequest(
+                                                existing,
+                                                core.keyExchange.cancelRequest(existing),
+                                            )
+                                            activeRequestIds = activeRequestIds - r.id
+                                            status = "Permintaan dibatalkan."
+                                        }
+                                    },
+                                    enabled = !working,
+                                )
+                            }
+                            if (
+                                r.recovery == RecoveryState.HOLDERS_ACKNOWLEDGED &&
+                                    r.integrity != IntegrityState.KEY_REQUIRED
+                            )
+                                Pill(
+                                    "Aktifkan akses bersama saja",
+                                    { retireId = r.id },
+                                    enabled = !working,
+                                )
                         }
                     }
                     selectedRequest != null -> {
@@ -566,6 +649,102 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                             }
                             Spacer(Modifier.height(12.dp))
                         }
+                        val availableHolders =
+                            links.filter {
+                                it.getString("owner_user_id") == session?.userId.toString() &&
+                                    it.getString("state") == "active" &&
+                                    sessions.pinned(it)
+                            }
+                        if (availableHolders.size >= 2)
+                            SwaraCard {
+                                Text("Pemulihan 2 dari 3", color = Plum, fontSize = 18.sp)
+                                Text(
+                                    "Pilih dua pendamping. Dua dari tiga pemegang dapat menyetujui akses tanpa harus melibatkan pemilik.",
+                                    color = Muted,
+                                    fontSize = 13.sp,
+                                )
+                                availableHolders.forEach { link ->
+                                    val id = link.getString("id")
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Checkbox(
+                                            checked = id in recoveryHolders,
+                                            onCheckedChange = { checked ->
+                                                recoveryHolders =
+                                                    if (checked) recoveryHolders + id
+                                                    else recoveryHolders - id
+                                            },
+                                            enabled =
+                                                id in recoveryHolders || recoveryHolders.size < 2,
+                                        )
+                                        Text(
+                                            link
+                                                .getJSONObject("holderDevice")
+                                                .getString("id")
+                                                .take(16),
+                                            fontSize = 13.sp,
+                                        )
+                                    }
+                                }
+                                Pill(
+                                    "Gunakan 2 dari 3",
+                                    {
+                                        action {
+                                            val selected =
+                                                availableHolders.filter {
+                                                    it.getString("id") in recoveryHolders
+                                                }
+                                            require(
+                                                selected.size == 2 &&
+                                                    selected
+                                                        .map { it.getString("holder_user_id") }
+                                                        .distinct()
+                                                        .size == 2
+                                            )
+                                            val own = core.identity.publicIdentity()
+                                            val members =
+                                                listOf(
+                                                    CloudMember(
+                                                        1,
+                                                        session!!.userId,
+                                                        own.deviceId,
+                                                        own.hpkeFingerprint,
+                                                        own.signingFingerprint,
+                                                    )
+                                                ) +
+                                                    selected.mapIndexed { index, link ->
+                                                        val d = link.getJSONObject("holderDevice")
+                                                        CloudMember(
+                                                            index + 2,
+                                                            UUID.fromString(
+                                                                link.getString("holder_user_id")
+                                                            ),
+                                                            UUID.fromString(d.getString("id")),
+                                                            d.getString("hpke_fingerprint"),
+                                                            d.getString("signing_fingerprint"),
+                                                        )
+                                                    }
+                                            policy =
+                                                CloudCapturePolicy(
+                                                    session!!.userId,
+                                                    own.deviceId,
+                                                    "recovery_2of3",
+                                                    members,
+                                                )
+                                            status =
+                                                "Kebijakan 2 dari 3 dipilih untuk rekaman baru."
+                                        }
+                                    },
+                                    enabled =
+                                        !working &&
+                                            recoveryHolders.size == 2 &&
+                                            availableHolders
+                                                .filter { it.getString("id") in recoveryHolders }
+                                                .map { it.getString("holder_user_id") }
+                                                .distinct()
+                                                .size == 2,
+                                    filled = true,
+                                )
+                            }
                         if (links.isEmpty())
                             EmptyState(
                                 "Belum ada perangkat",
@@ -580,7 +759,7 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                                 TextButton(
                                     onClick = {
                                         requireAccount {
-                                            accessRequests = client!!.getAccessRequests()
+                                            refreshM3()
                                             status = "Permintaan akses dimuat."
                                         }
                                     },
@@ -590,6 +769,51 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                                 }
                             },
                         )
+                        remoteRecordings.forEach { remote ->
+                            val packet = M3TransportCodec.policy(remote)
+                            val remoteId = M3TransportCodec.recordingId(packet)
+                            SwaraCard {
+                                Text(
+                                    if (remote.getString("kind") == "live_event") "Kejadian"
+                                    else "Penuturan",
+                                    color = Plum,
+                                )
+                                Text(remoteId.toString().take(12), fontSize = 12.sp, color = Muted)
+                                val existing = activeRequestIds[remoteId]
+                                if (existing == null)
+                                    Pill(
+                                        "Minta akses",
+                                        { requireAccount { requestRecovery(packet) } },
+                                        enabled =
+                                            !working &&
+                                                remote.getString("syncState") == "synced" &&
+                                                remote.getString("recoveryState") ==
+                                                    "holders_acknowledged",
+                                    )
+                                else {
+                                    Text("Status: ${requestStates[existing] ?: "pending"}")
+                                    Pill(
+                                        "Pulihkan",
+                                        { requireAccount { recoverRecording(existing) } },
+                                        enabled = !working && requestStates[existing] == "ready",
+                                    )
+                                    Pill(
+                                        "Batalkan",
+                                        {
+                                            requireAccount {
+                                                client!!.cancelRequest(
+                                                    existing,
+                                                    core.keyExchange.cancelRequest(existing),
+                                                )
+                                                activeRequestIds = activeRequestIds - remoteId
+                                            }
+                                        },
+                                        enabled = !working,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
                         if (accessRequests.isEmpty())
                             EmptyState(
                                 "Belum ada permintaan",
@@ -701,11 +925,15 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                                     {
                                         policy = null
                                         sessions.clear()
+                                        scope.launch { core.playback.release() }
                                         session = null
                                         links = emptyList()
                                         invitation = ""
                                         accessRequests = emptyList()
                                         activeRequestIds = emptyMap()
+                                        remoteRecordings = emptyList()
+                                        requestStates = emptyMap()
+                                        recoveryHolders = emptySet()
                                         status = "Berhasil keluar."
                                     },
                                     enabled = !working,
@@ -727,6 +955,33 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                 Spacer(Modifier.height(24.dp))
             }
         }
+    retireId?.let { id ->
+        AlertDialog(
+            onDismissRequest = { retireId = null },
+            title = { Text("Aktifkan akses bersama saja?") },
+            text = {
+                Text(
+                    "Kunci pembuka lokal akan dihapus. Setelah ini, membuka rekaman memerlukan persetujuan sesuai kebijakan. Pastikan semua pemegang sudah terhubung."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        retireId = null
+                        action {
+                            core.keyExchange.retireLocalKey(id, thresholdOnlyConsent = true)
+                            core.vault.inspect(id)
+                            status =
+                                "Kunci lokal dihapus. Rekaman kini memerlukan pemulihan bersama."
+                        }
+                    }
+                ) {
+                    Text("Setujui")
+                }
+            },
+            dismissButton = { TextButton(onClick = { retireId = null }) { Text("Batal") } },
+        )
+    }
     auditText?.let { text ->
         AlertDialog(
             onDismissRequest = {
@@ -744,7 +999,7 @@ private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context)
                     onClick = {
                         pendingLink?.let { link ->
                             action {
-                                client!!.confirm(link, core.identity)
+                                client!!.confirm(link, core.identity, core.keyExchange)
                                 refresh()
                                 status = "Konfirmasi tersimpan."
                             }

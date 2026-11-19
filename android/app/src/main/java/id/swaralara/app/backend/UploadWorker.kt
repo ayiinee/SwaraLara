@@ -20,6 +20,7 @@ class UploadWorker(context: Context,parameters: WorkerParameters): CoroutineWork
             if(snapshot.policyCode=="demo_2of3")return Result.failure()
             if(snapshot.cloudOwnerUserId!=sessions.load()?.userId){core.vault.markSyncFailure(id,"AUTH_REQUIRED");return Result.failure()}
             CloudClient(url,BuildConfig.SUPABASE_PUBLISHABLE_KEY,sessions).sync(snapshot,core.vault::acknowledgeUpload)
+            EnvelopeWorker.enqueue(applicationContext,id)
             Result.success()
         } catch(e: CancellationException){throw e}
         catch(e: CloudError) {

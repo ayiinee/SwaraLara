@@ -2,13 +2,13 @@ import {
   ApiError,
   b64,
   bytesHex,
-  decodeLp,
   decodePolicy,
   demand,
   deviceProof,
   encodeLp,
   fields,
   hash,
+  hex,
   integer,
   label,
   parseAction,
@@ -22,6 +22,7 @@ import {
   validateHpkePublic,
   verify,
 } from "./protocol.ts";
+import { bindEnvelope, live, lpShape, number64 } from "./m3-validation.ts";
 export interface Database {
   call(actor: string, action: string, p?: any): Promise<any>;
 }
@@ -48,7 +49,7 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
       );
       const method = request.method;
       if (method === "GET" && path === "/health") {
-        return respond({ status: "ok", version: "m2" });
+        return respond({ status: "ok", version: "m3" });
       }
       const bearer = request.headers.get("authorization");
       demand(
@@ -282,11 +283,23 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
           nextCursor: items.length === 50 ? items.at(-1).id : null,
         });
       }
+      if (path === "/m3/recordings" && method === "GET") {
+        const deviceId = uuid(
+          new URL(request.url).searchParams.get("deviceId"),
+        );
+        return respond(await call("m3_recordings", { deviceId }));
+      }
       match = /^\/recordings\/([^/]+)(?:\/(.*))?$/.exec(path);
       if (match) {
         const id = uuid(match[1]), tail = match[2] ?? "";
         if (!tail && method === "GET") {
           return respond(await call("detail", { id }));
+        }
+        if (tail === "members" && method === "GET") {
+          return respond(await call("m3_members", { id }));
+        }
+        if (tail === "acknowledgments" && method === "GET") {
+          return respond(await call("m3_acknowledgments", { id }));
         }
         if (tail === "audit" && method === "GET") {
           return respond(await call("audit", { id }));
@@ -373,6 +386,13 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             const cipher = unbase64(env.envelopeCiphertextBase64, 16384);
             demand(await sha(cipher) === env.ciphertextSha256);
             const ctx = unbase64(env.contextBytesBase64, 4096);
+            bindEnvelope(
+              ctx,
+              id,
+              rec.policy_snapshot_hash,
+              env.shareIndex,
+              env.holderDeviceId,
+            );
             const sigPayload = encodeLp(
               "swaralara/share-envelope-signature/v1",
               ctx,
@@ -401,7 +421,8 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
           const signatureBase64 = new URL(request.url).searchParams.get(
             "signatureBase64",
           );
-          if (actionBase64 && signatureBase64) {
+          demand(actionBase64 && signatureBase64, "DEVICE_SIGNATURE_REQUIRED");
+          {
             const actBytes = unbase64(actionBase64, 1024);
             const act = parseAction(actBytes);
             demand(
@@ -414,10 +435,21 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
               actBytes,
               unbase64(signatureBase64, 80),
             );
-          } else {
-            await call("device", { id: deviceId });
           }
-          return respond(await call("my_share", { recordingId: id, deviceId }));
+          const envelope = await call("my_share", {
+            recordingId: id,
+            deviceId,
+          });
+          const action = parseAction(unbase64(actionBase64, 1024));
+          const policyHash = await sha(
+            unbase64(envelope.policySnapshotBase64.replace(/\s/g, ""), 512),
+          );
+          demand(
+            action.resourceId === id && action.policyHash === policyHash &&
+              action.objectHash === policyHash,
+            "CONTEXT_BINDING",
+          );
+          return respond(envelope);
         }
         if (tail === "my-share/ack" && method === "POST") {
           await rate("request");
@@ -434,6 +466,22 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
               act.deviceId === p.deviceId,
           );
           const dev = await call("device", { id: p.deviceId });
+          const envelope = await call("my_share", {
+            recordingId: id,
+            deviceId: p.deviceId,
+          });
+          demand(
+            act.resourceId === id &&
+              act.policyHash ===
+                await sha(
+                  unbase64(
+                    envelope.policySnapshotBase64.replace(/\s/g, ""),
+                    512,
+                  ),
+                ) &&
+              act.objectHash === envelope.ciphertextSha256,
+            "CONTEXT_BINDING",
+          );
           await verify(
             unbase64(dev.signingBase64.replace(/\s/g, "")),
             actBytes,
@@ -444,6 +492,7 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
               recordingId: id,
               deviceId: p.deviceId,
               ackSignatureBase64: p.signatureBase64,
+              actionBytesBase64: p.actionBytesBase64,
             }),
           );
         }
@@ -472,23 +521,60 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             Number.isFinite(Date.parse(p.expiresAt)),
         );
         const reqBytes = unbase64(p.requestBytesBase64, 2048);
-        const reqFields = decodeLp(reqBytes);
-        demand(reqFields.length === 9, "MALFORMED_REQUEST");
-        demand(
-          new TextDecoder("ascii").decode(reqFields[0]) ===
-            "swaralara/key-request/v1",
-          "INVALID_DOMAIN",
-        );
+        const parts = lpShape(reqBytes, "swaralara/key-request/v1", [
+          16,
+          16,
+          16,
+          32,
+          32,
+          8,
+          8,
+          16,
+        ]);
+        const reqFields = [new Uint8Array(), ...parts];
         demand(uuidAt(reqFields[1], 0) === p.id);
         demand(uuidAt(reqFields[2], 0) === p.recordingId);
         demand(uuidAt(reqFields[3], 0) === p.requesterDeviceId);
+        const rec = await call("detail", { id: p.recordingId });
+        const publicKey = unbase64(p.requestHpkePublicKeysetBase64, 4096);
+        const publicSet = strictJson(
+          new TextDecoder("utf-8", { fatal: true }).decode(publicKey),
+        );
+        demand(Array.isArray(publicSet.key) && publicSet.key.length === 1);
+        const publicEntry = publicSet.key[0];
+        demand(
+          publicEntry.status === "ENABLED" &&
+            publicEntry.outputPrefixType === "TINK" &&
+            publicEntry.keyId === publicSet.primaryKeyId &&
+            publicEntry.keyData?.typeUrl ===
+              "type.googleapis.com/google.crypto.tink.HpkePublicKey" &&
+            publicEntry.keyData?.keyMaterialType === "ASYMMETRIC_PUBLIC",
+        );
+        validateHpkePublic(unbase64(publicEntry.keyData.value, 128));
+        demand(
+          hex(reqFields[4]) ===
+            await sha(
+              unbase64(rec.policySnapshotBase64.replace(/\s/g, ""), 512),
+            ),
+          "CONTEXT_BINDING",
+        );
+        demand(hex(reqFields[5]) === await sha(publicKey), "CONTEXT_BINDING");
+        const issuedAt = number64(reqFields[6]),
+          expiresAt = number64(reqFields[7]);
+        live(issuedAt, expiresAt);
+        demand(expiresAt === Date.parse(p.expiresAt), "CONTEXT_BINDING");
         const dev = await call("device", { id: p.requesterDeviceId });
         await verify(
           unbase64(dev.signingBase64.replace(/\s/g, "")),
           reqBytes,
           unbase64(p.requestSignatureBase64, 80),
         );
-        return respond(await call("request_create", p));
+        return respond(
+          await call("request_create", {
+            ...p,
+            requestNonce: uuidAt(reqFields[8], 0),
+          }),
+        );
       }
       if (path === "/access-requests" && method === "GET") {
         return respond(await call("request_list"));
@@ -517,6 +603,11 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
           integer(p.shareIndex, 1, 3);
           const dev = await call("device", { id: p.holderDeviceId });
           const decBytes = unbase64(p.signedDecisionBase64, 2048);
+          demand(
+            new TextDecoder().decode(decBytes) ===
+              `${p.decision}:${id}:${p.shareIndex}`,
+            "DECISION_BINDING",
+          );
           await verify(
             unbase64(dev.signingBase64.replace(/\s/g, "")),
             decBytes,
@@ -531,6 +622,44 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             const relCipher = unbase64(p.releaseCiphertextBase64, 16384);
             demand(await sha(relCipher) === p.ciphertextSha256);
             const ctxBytes = unbase64(p.contextBytesBase64, 4096);
+            const req = await call("request_detail", { id });
+            const f = lpShape(ctxBytes, "swaralara/share-release/v1", [
+              16,
+              16,
+              16,
+              32,
+              32,
+              4,
+              16,
+              8,
+              8,
+              16,
+            ]);
+            const requestRaw = unbase64(
+              req.requestBytesBase64.replace(/\s/g, ""),
+              2048,
+            );
+            const requestFields = lpShape(
+              requestRaw,
+              "swaralara/key-request/v1",
+              [16, 16, 16, 32, 32, 8, 8, 16],
+            );
+            demand(
+              uuidAt(f[0], 0) === id && uuidAt(f[1], 0) === req.recordingId &&
+                uuidAt(f[2], 0) === req.requesterDeviceId &&
+                hex(f[3]) === hex(requestFields[3]) &&
+                hex(f[4]) === await sha(requestRaw) &&
+                new DataView(f[5].buffer, f[5].byteOffset, 4).getUint32(0) ===
+                  p.shareIndex &&
+                uuidAt(f[6], 0) === p.holderDeviceId &&
+                number64(f[7]) === Date.parse(req.expiresAt),
+              "CONTEXT_BINDING",
+            );
+            demand(
+              number64(f[8]) >= number64(requestFields[5]) - 30000 &&
+                number64(f[8]) <= Date.now() + 30000,
+              "EXPIRED_ACTION",
+            );
             const sigPayload = encodeLp(
               "swaralara/share-release-signature/v1",
               ctxBytes,
@@ -544,7 +673,61 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
           }
           return respond(await call("request_decision", { id, ...p }));
         }
-        if (tail === "releases" && method === "GET") {
+        if (
+          ["releases", "recording", "segments"].includes(tail) &&
+          method === "GET"
+        ) {
+          const req = await call("request_detail", { id });
+          demand(Date.now() < Date.parse(req.expiresAt), "EXPIRED", 410);
+          demand(req.state === "ready", "CONFLICT", 409);
+          const query = new URL(request.url).searchParams;
+          const actBytes = unbase64(query.get("actionBase64"), 1024);
+          const act = parseAction(actBytes);
+          demand(
+            act.action === "release_list" &&
+              act.recordingId === req.recordingId && act.resourceId === id &&
+              act.deviceId === req.requesterDeviceId &&
+              act.policyHash ===
+                await sha(
+                  unbase64(req.policySnapshotBase64.replace(/\s/g, ""), 512),
+                ) &&
+              act.objectHash ===
+                await sha(
+                  unbase64(req.requestBytesBase64.replace(/\s/g, ""), 2048),
+                ) &&
+              act.expiresAt === Date.parse(req.expiresAt),
+            "CONTEXT_BINDING",
+          );
+          const dev = await call("device", { id: act.deviceId });
+          await verify(
+            unbase64(dev.signingBase64.replace(/\s/g, "")),
+            actBytes,
+            unbase64(query.get("signatureBase64"), 80),
+          );
+          if (tail === "recording") {
+            return respond(await call("recovery_recording", { id }));
+          }
+          if (tail === "segments") {
+            await rate("read");
+            const offset = integer(
+              Number(query.get("offset") ?? "0"),
+              0,
+              100000,
+            );
+            const rows = await call("recovery_segments", { id, offset });
+            const items = [];
+            for (const row of rows) {
+              items.push({
+                index: Number(row.segment_index),
+                objectHash: row.object_sha256,
+                previousHash: row.previous_sha256,
+                byteLength: row.byte_length,
+                sampleCount: row.sample_count,
+                readUrl: await deps.storage.signRead(row.storage_path),
+              });
+            }
+            return respond(items);
+          }
           return respond(await call("request_releases", { id }));
         }
         if (tail === "cancel" && method === "POST") {
@@ -557,6 +740,21 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
           uuid(p.deviceId);
           const actBytes = unbase64(p.actionBytesBase64, 1024);
           const act = parseAction(actBytes);
+          const req = await call("request_detail", { id });
+          demand(
+            act.recordingId === req.recordingId &&
+              act.deviceId === req.requesterDeviceId &&
+              act.policyHash ===
+                await sha(
+                  unbase64(req.policySnapshotBase64.replace(/\s/g, ""), 512),
+                ) &&
+              act.objectHash ===
+                await sha(
+                  unbase64(req.requestBytesBase64.replace(/\s/g, ""), 2048),
+                ) &&
+              act.expiresAt === Date.parse(req.expiresAt),
+            "CONTEXT_BINDING",
+          );
           demand(
             act.action === "request_cancel" && act.resourceId === id &&
               act.deviceId === p.deviceId,
@@ -567,7 +765,7 @@ export function makeApi(deps: { db: Database; storage: Storage; auth: Auth }) {
             actBytes,
             unbase64(p.signatureBase64, 80),
           );
-          return respond(await call("request_cancel", { id }));
+          return respond(await call("request_cancel", { id, ...p }));
         }
       }
       throw new ApiError(404, "NOT_FOUND");

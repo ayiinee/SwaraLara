@@ -32,7 +32,14 @@ internal class LocalKeyExchange(
         device: PublicDeviceIdentity,
         expectedHpkeFingerprint: String,
         expectedSigningFingerprint: String,
-    ) = operation {
+    ) = operation { pinLocked(userId, device, expectedHpkeFingerprint, expectedSigningFingerprint) }
+
+    private suspend fun pinLocked(
+        userId: UUID,
+        device: PublicDeviceIdentity,
+        expectedHpkeFingerprint: String,
+        expectedSigningFingerprint: String,
+    ) {
         require(
             device.hpkeFingerprint == expectedHpkeFingerprint &&
                 device.signingFingerprint == expectedSigningFingerprint
@@ -68,6 +75,41 @@ internal class LocalKeyExchange(
         db.withTransaction {
             val old = dao.trusted(row.deviceId)
             if (old == null) dao.trusted(row) else require(old == row) { "TRUSTED_DEVICE_CHANGED" }
+        }
+    }
+
+    override suspend fun acceptPolicyDevices(
+        policy: SignedPolicyPackage,
+        devices: List<PublicDeviceIdentity>,
+    ) = operation {
+        val p = this.policy(policy)
+        ownMember(p)
+        require(
+            devices.map { it.deviceId }.toSet() == p.policy.members.map { it.deviceId }.toSet() &&
+                devices.size == p.policy.members.size
+        )
+        db.withTransaction {
+            p.policy.members.forEach { member ->
+                val device = devices.single { it.deviceId == member.deviceId }
+                pinLocked(member.userId, device, member.hpkeFingerprint, member.signingFingerprint)
+            }
+        }
+    }
+
+    override suspend fun pendingRequests() = operation {
+        dao.expireRequests(now())
+        dao.closedRequests().forEach { KeyProtector.destroyRequestKey(UUID.fromString(it)) }
+        dao.pendingRequests().map { M3Json.request(it.packetJson) }
+    }
+
+    override suspend fun outgoingCancellations() = operation {
+        val own = identity.publicIdentity().deviceId
+        dao.cancellations().mapNotNull { row ->
+            val action = M3Json.action(row.packetJson)
+            val binding = M3Wire.action(M3Wire.decodeBounded(action.payloadBase64, 1024))
+            if (binding.deviceId == own && binding.expiresAt > now())
+                UUID.fromString(row.requestId) to action
+            else null
         }
     }
 

@@ -86,6 +86,10 @@ internal class LocalPlayback(
                                 .build()
                         track = output
                         check(output.state == AudioTrack.STATE_INITIALIZED)
+                        // A short, authenticated tail can be smaller than the stream buffer.
+                        // Waiting for a full buffer would leave such clips stuck in PLAYING.
+                        if (android.os.Build.VERSION.SDK_INT >= 31)
+                            output.setStartThresholdInFrames(1)
                         output.play()
                         vault.withKey(recordingId) { key ->
                             var previous = ByteArray(32)
@@ -140,6 +144,7 @@ internal class LocalPlayback(
                                 state.value.totalFrames
                         ) {
                             ensureActive()
+                            vault.requirePlaybackKey(recordingId)
                             delay(20)
                             mutable.update {
                                 it.copy(

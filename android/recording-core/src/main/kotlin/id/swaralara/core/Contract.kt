@@ -115,6 +115,11 @@ data class UploadReceipt(
 
 data class DemoRecoveryResult(val passed: Boolean, val pairsVerified: Int, val message: String)
 
+data class RemoteRecordingPackage(
+    val policy: SignedPolicyPackage, val kind: String, val startedAtDevice: Long,
+    val sampleRate: Int, val totalFrames: Long, val segmentCount: Int, val finalCapture: CaptureState,
+)
+
 enum class PlaybackPhase {
     IDLE,
     PREPARING,
@@ -141,6 +146,8 @@ interface RecorderController {
 }
 
 interface SecureVault {
+    /** Imports ciphertext only; authentication with a recovered key is still mandatory for playback. */
+    suspend fun importEncryptedRecording(recording: RemoteRecordingPackage, objects: Flow<ByteArray>)
     fun observeRecordings(): Flow<List<RecordingSummary>>
 
     suspend fun inspect(recordingId: UUID): IntegrityReport

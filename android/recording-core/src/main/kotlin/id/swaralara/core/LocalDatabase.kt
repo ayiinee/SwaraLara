@@ -199,6 +199,9 @@ internal interface LocalDao {
     @Query("SELECT * FROM LocalM3Request WHERE requestId=:id")
     suspend fun request(id: String): LocalM3Request?
 
+    @Query("SELECT * FROM LocalM3Request WHERE state IN ('PENDING','OPEN') ORDER BY expiresAt DESC")
+    suspend fun pendingRequests(): List<LocalM3Request>
+
     @Query("SELECT requestId FROM LocalM3Request WHERE state NOT IN ('PENDING','OPEN')")
     suspend fun closedRequests(): List<String>
 
@@ -228,6 +231,9 @@ internal interface LocalDao {
 
     @Query("SELECT * FROM LocalM3Cancellation WHERE requestId=:id")
     suspend fun cancellation(id: String): LocalM3Cancellation?
+
+    @Query("SELECT * FROM LocalM3Cancellation")
+    suspend fun cancellations(): List<LocalM3Cancellation>
 
     @Insert suspend fun retirement(retirement: LocalKeyRetirement)
 

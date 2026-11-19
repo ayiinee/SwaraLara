@@ -294,10 +294,14 @@ export async function startContractServer(port = 0, publicOrigin?: string) {
   };
 }
 if (process.argv[1]?.endsWith("contract-server.ts")) {
-  const fixture = await startContractServer(8787, "http://10.0.2.2:8787");
+  const port = Number(process.env.SWL_FIXTURE_PORT ?? "8787");
+  const fixture = await startContractServer(
+    port,
+    process.env.SWL_FIXTURE_PUBLIC_ORIGIN ?? `http://127.0.0.1:${port}`,
+  );
   await mkdir(".tools", { recursive: true });
   await writeFile(
-    ".tools/m2-contract-fixture.json",
+    process.env.SWL_FIXTURE_STATE_FILE ?? ".tools/m2-contract-fixture.json",
     JSON.stringify({
       password: fixture.password,
       key: fixture.key,
@@ -305,7 +309,7 @@ if (process.argv[1]?.endsWith("contract-server.ts")) {
     }),
   );
   console.log(
-    "TEST-ONLY contract fixture listening on port 8787; runtime credentials in ignored .tools/m2-contract-fixture.json",
+    `TEST-ONLY contract fixture listening on port ${port}; runtime credentials are in an ignored local state file`,
   );
   process.on("SIGINT", () => {
     fixture.close().then(() => process.exit(0));
