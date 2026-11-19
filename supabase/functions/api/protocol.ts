@@ -32,7 +32,7 @@ export function unbase64(s: unknown, max = 8192): Uint8Array {
       ),
   );
   const b = Uint8Array.from(atob(s), (x) => x.charCodeAt(0));
-  demand(b.length <= max);
+  demand(b.length <= max && b64(b) === s, "BASE64_CANONICAL");
   return b;
 }
 export function uuid(s: unknown): string {

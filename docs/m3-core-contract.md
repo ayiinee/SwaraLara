@@ -2,8 +2,8 @@
 
 Branch task `feat/m3-hpke-recovery` dibuat dari hasil M2 `81fd2a3` agar identitas
 perangkat, signed policy dan Room v2 tersedia. Scope: core-crypto, recording-core,
-pengujian serta kontrak handoff. App, migration server dan route API M3 tetap
-pekerjaan Orang 1; dokumen ini tidak menyatakan distribusi melalui server telah aktif.
+pengujian serta kontrak handoff. Integrasi app, migration server dan route API tersedia pada
+[panduan integrasi M3](m3-integration.md); validasi hosted tetap terpisah.
 
 ## Facade
 
@@ -15,6 +15,8 @@ core; app tidak menerima DEK, private key atau share plaintext.
 |---|---|
 | `pinTrustedDevice(userId, device, expectedHpkeFingerprint, expectedSigningFingerprint)` | Core memverifikasi proof SWD2, suite publik HPKE, SPKI P-256 dan hash. Caller menyediakan asosiasi akun/perangkat terverifikasi serta fingerprint yang sudah dicocokkan melalui pemasangan. Perubahan key/user untuk device ID yang sama ditolak; tidak ada auto-repin |
 | `exportPolicy(recordingId)` | Snapshot SWP1 asli dan signature DER, tanpa reserialize |
+| `acceptPolicyDevices(policy, devices)` | Verifikasi owner yang sudah dipin, membership perangkat sendiri, proof publik dan fingerprint seluruh roster terhadap snapshot bertanda tangan; pin atomik |
+| `pendingRequests()` / `outgoingCancellations()` | Pulihkan request dari Room, bersihkan kunci expired, dan ulangi pengiriman cancellation yang telah disetujui pengguna |
 | `prepareDistribution(recordingId)` | Owner, capture final dan paket lokal lolos autentikasi. Split DEK yang ada sesuai policy, HPKE ke setiap perangkat snapshot, sign lalu persist semua ciphertext sebelum mengembalikannya. Retry mengembalikan envelope yang sama; tidak resplit/reencrypt |
 | `authorizeShareRead(policy)` | Signed action `my_share` untuk anggota/perangkat sendiri; JWT saja tidak cukup pada transport |
 | `receiveShare(policy, envelope)` | Verifikasi policy/owner signature/fingerprint/context, buka dengan HPKE lokal, validasi SWB1, simpan ciphertext dan buat acknowledgment bertanda tangan. Tidak mengembalikan share plaintext |
@@ -36,8 +38,9 @@ Signature JCA SHA256withECDSA P-256 berupa ASN.1 DER. Codec JSON lokal hanya unt
 persistence; signature selalu atas bytes biner asli, bukan JSON yang diserialisasi ulang.
 
 `recover` membutuhkan ciphertext/indeks rekaman sudah tersedia di vault lokal.
-Download/import paket pada perangkat baru dan verifikasi final manifest merupakan
-handoff berikutnya; tidak ada API yang menyerahkan raw DEK ke app untuk melewati batas ini.
+Transport kini mengunduh ciphertext sesudah request ready dan mengimpornya melalui
+`SecureVault.importEncryptedRecording`. Tidak ada API yang menyerahkan raw DEK
+ke app. Verifikasi final manifest tetap M4; perangkat peminta harus anggota snapshot.
 
 ## Encoding kriptografi
 
@@ -134,18 +137,21 @@ dan tidak membuktikan audio asli berubah. Manifest/checkpoint lengkap tetap M4.
 
 ## Handoff Orang 1 dan batas pengujian
 
-Orang 1 perlu menambahkan transport share-envelopes, my-share/ack, request,
-decision+release, cancellation dan read authorization. Server memverifikasi LP,
-DER/P1363, actor JWT, device/member dari snapshot, hash, expiry server, nonce dan
-idempotensi; keputusan approve+release harus atomik. Jangan hanya menghitung
-response 200 atau akun yang menyetujui. Pengiriman cancellation diperlukan sebelum
-core perangkat lain mengetahui perubahan state; bagian yang telah diperoleh tidak
-dapat dicabut secara kriptografis oleh expiry/cancellation.
+Audit 19 November 2026: route backend M3 kini tersedia pada API produksi dan diuji
+melalui PGlite/HTTP fixture; penguatan signature/context, nonce request dan expiry
+memakai migrasi `202611190004_m3_security.sql`. Kontrak HTTP terbaru dijelaskan di
+`backend-api.md`. Transport Android kini tersedia melalui migration 005 dan
+codec/worker bersama. Hasil JVM/backend fixture tidak menggantikan validasi
+Supabase hosted atau beberapa ponsel fisik. Cakupan dan hasil integrasi dicatat
+di [m3-integration.md](m3-integration.md).
 
-Pairing juga perlu mengangkut public keyset/SPKI beserta proof SWD2, bukan
-fingerprint saja. Response trust M2 saat ini menghilangkan bytes public key dan
-tidak menyimpan proof registrasi; gunakan pertukaran paket public identity saat
-pairing atau tambahkan persistence/endpoint berotorisasi pada task Orang 1.
+Transport Android kini memakai `M3TransportCodec`, `M3CloudTransport` dan `M3Sync`.
+Migration 005 menyimpan proof SWD2 perangkat dan bytes acknowledgment/cancellation
+asli, menyediakan roster publik berotorisasi serta receipt terikat per share.
+Pairing mengisi pin core setelah pengguna mencocokkan fingerprint. Roster anggota
+lain harus sesuai snapshot yang ditandatangani pemilik yang telah dipin.
+Server tetap menegakkan actor, binding, expiry, nonce, idempotensi dan cancellation.
+
 Response M3 harus menyertakan snapshot SWP1 dan signature aslinya agar holder
 dapat memverifikasi roster secara lokal. Backend menerima/menolak masa berlaku
 yang ditandatangani berdasarkan jam server; jangan mengubah field expiry/key
@@ -157,7 +163,7 @@ policy yang sah, replay/binding, signature, malformed input dan autentikasi GCM.
 Fixture signature publik mencantumkan `origin=jvm` dan diverifikasi pada Node
 serta Deno/WebCrypto; ini tidak disebut hasil eksekusi Android.
 
-Suite Android disiapkan dengan identitas JCA/Tink, database dan namespace
+Catatan historis 18 November: suite Android disiapkan dengan identitas JCA/Tink, database dan namespace
 terpisah pada satu emulator. Receipt transport sintetis diberi label test-only;
 ack pemegang harus dibuat lewat decrypt/validate. Pada task ini emulator gagal
 boot karena commit memory tidak cukup (1726 MB tersedia, 2048 MB diperlukan),
@@ -169,3 +175,5 @@ Rujukan implementasi: [Tink Hybrid Encryption](https://developers.google.com/tin
 menjelaskan context dan perlunya autentikasi pengirim terpisah;
 [source serialization Tink 1.17.0](https://github.com/tink-crypto/tink-java/blob/v1.17.0/src/main/java/com/google/crypto/tink/TinkJsonProtoKeysetFormat.java)
 mendukung pemeriksaan API versi terpin. Hasil aktual dicatat di progress.md.
+
+Implementasi transport dan runner perangkat fisik terbaru: [m3-integration.md](m3-integration.md).

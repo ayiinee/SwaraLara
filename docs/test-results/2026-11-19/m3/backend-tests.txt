@@ -1,0 +1,42 @@
+
+> test
+> node --test --test-concurrency=1 supabase/tests/*.test.ts
+
+✔ Supabase adapter verifies JWT through Auth and transports RPC over HTTP (15407.397ms)
+✔ production API adapter uploads immutable ciphertext and verifies Storage bytes over HTTP (11317.7626ms)
+✔ deny direct table/RPC/storage access even with unrelated permissive policy (14154.8881ms)
+✔ unauthenticated/expired token and forged actor body fail closed (6.4923ms)
+✔ device proof rejects altered key, private keyset and device ownership takeover (186.2522ms)
+✔ invitation expires/consumes once and link needs both device signatures (239.9036ms)
+✔ immutable signed policy pins members, rejects demo and changed fingerprints (628.0823ms)
+✔ A/B isolation and member permissions cover reads/uploads/commit/audit/path injection (217.7007ms)
+✔ verified commit handles loss before/after upload and lost receipt idempotently (408.2437ms)
+✔ header corruption and declaration/hash mismatch never create committed metadata (52.6416ms)
+✔ request bounds reject malformed UTF-8, oversized bodies and excess attempts (75.6918ms)
+✔ strict parsing rejects duplicate/escaped keys, trailing bytes and invalid ASN.1 (6.6255ms)
+✔ M3 roster carries proof bytes only to paired users and recording members (13378.1342ms)
+✔ M3 upload retry returns bound receipts and owner receives original signed acknowledgment (13522.542ms)
+✔ M3 decision retry is idempotent; encrypted download requires ready state and requester proof (17442.8946ms)
+✔ M3 cancellation retains signed bytes, retries safely and revokes recovery download (24622.7497ms)
+▶ M3 Edge API: share envelopes, acknowledgment, and threshold access requests
+  ✔ manages share envelope distribution, holder ack, access requests, and release decisions (19806.3172ms)
+✔ M3 Edge API: share envelopes, acknowledgment, and threshold access requests (19851.53ms)
+✔ request expiry must equal signed expiry (30010.0565ms)
+✔ request public HPKE key must equal signed key hash (17329.5703ms)
+✔ signed request nonce cannot be reused under another request id (23816.1796ms)
+✔ request id retry cannot replace bound request bytes (20604.2714ms)
+✔ release signed for another request cannot approve this request (22398.6487ms)
+✔ repeated concurrent approval from same holder never meets threshold (22955.6146ms)
+✔ distinct concurrent approvals meet owner-required threshold atomically (15467.0668ms)
+✔ expired ready request cannot return releases (14429.6944ms)
+✔ cancel ready request closes it and blocks subsequent release reads (17410.0886ms)
+✔ release read requires requester device signature (17508.8763ms)
+✔ acknowledgment binds envelope hash and policy (14516.572ms)
+ℹ tests 28
+ℹ suites 1
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 361719.704

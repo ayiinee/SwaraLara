@@ -66,6 +66,13 @@ interface SecureKeyExchange {
 
     suspend fun exportPolicy(recordingId: UUID): SignedPolicyPackage
 
+    /** Roster is authenticated by the already pinned owner's signed policy; every identity must prove its key. */
+    suspend fun acceptPolicyDevices(policy: SignedPolicyPackage, devices: List<PublicDeviceIdentity>)
+
+    suspend fun pendingRequests(): List<KeyAccessRequest>
+
+    suspend fun outgoingCancellations(): List<Pair<UUID, DeviceSignedAction>>
+
     suspend fun prepareDistribution(recordingId: UUID): List<ShareEnvelope>
 
     suspend fun receiveShare(

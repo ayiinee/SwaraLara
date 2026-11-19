@@ -24,7 +24,7 @@ import java.util.UUID
 @RunWith(AndroidJUnit4::class)
 class CloudIntegrationTest {
     @get:Rule val permission: GrantPermissionRule=GrantPermissionRule.grant(Manifest.permission.RECORD_AUDIO)
-    private val origin="http://10.0.2.2:8787"
+    private val origin=BuildConfig.SUPABASE_URL.ifBlank { "http://10.0.2.2:8787" }
     private suspend fun finished(manager: WorkManager,id: UUID): WorkInfo = withTimeout(60000) {
         var info: WorkInfo?=null
         while(info?.state?.isFinished!=true) {
@@ -89,7 +89,9 @@ class CloudIntegrationTest {
             client.sync(snapshot,core.vault::acknowledgeUpload)
             client.sync(core.vault.exportEncryptedSnapshot(id),core.vault::acknowledgeUpload)
             val summary=core.vault.observeRecordings().first().single {it.id==id}
-            assertEquals(SyncState.SYNCED,summary.sync);assertEquals(RecoveryState.DEGRADED,summary.recovery)
+            assertEquals(SyncState.SYNCED,summary.sync)
+            // M3 may already distribute ciphertext; the simulated holder has not decrypted/acked it.
+            assertTrue(summary.recovery in setOf(RecoveryState.DEGRADED,RecoveryState.ENVELOPES_QUEUED,RecoveryState.ENVELOPES_UPLOADED))
             snapshot.segments.forEachIndexed {i,s->assertArrayEquals(originals[i],s.file.readBytes())}
             val stats=fixture("counts",owner).getJSONObject("data")
             assertEquals(snapshot.segments.size,stats.getInt("segments"));assertEquals(snapshot.segments.size,stats.getInt("objects"))

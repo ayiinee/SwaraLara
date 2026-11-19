@@ -27,7 +27,7 @@ test("deny direct table/RPC/storage access even with unrelated permissive policy
   const tables = (await db.query(
     "select tablename from pg_tables where schemaname='public'",
   )).rows;
-  assert.equal(tables.length, 15);
+  assert.equal(tables.length, 16);
   for (const role of ["anon", "authenticated"]) {
     await db.exec(`set role ${role}`);
     try {

@@ -7,7 +7,8 @@ Gunakan ucapan simulasi; prototipe belum divalidasi untuk pengaduan nyata.
 M0 sudah build. Alur utama M1 lulus pada emulator Android 15: 6 test JVM, 6 test vault Android,
 dan 1 test gestur/recorder/pemulihan/player. Android lint lulus dengan nol error.
 M2 menambahkan backend API, policy bertanda tangan dan sinkronisasi Android.
-Dua belas tes backend dan sepuluh tes Android lulus; gate Supabase penuh dan perangkat fisik masih terbuka.
+Dua belas tes backend dan sepuluh tes Android M2 historis lulus; gate provider
+Supabase asli tetap terbuka. Pengujian fisik terbaru dijelaskan pada panduan M3/frontend.
 Rincian serta log aktual ada di [progres](docs/progress.md).
 
 ## Menjalankan
@@ -36,7 +37,9 @@ Izinkan mikrofon → tahan 1,5 detik → tunggu status **Merekam** → ucapkan d
 Lepas sebelum ambang membatalkan; lepas sesudah aktif tetap merekam. Tombol berhenti tersedia juga di notifikasi.
 
 Durasi dihitung dari frame PCM tersimpan, termasuk tail. Data demo terpisah dari aplikasi utama.
-Hapus aplikasi/Keystore dapat menghilangkan akses; belum ada pemulihan di luar perangkat.
+Hapus aplikasi/Keystore dapat menghilangkan akses demo lokal. Rekaman integrated
+M3 mengikuti snapshot anggota dan pemulihan threshold; identitas baru pengganti
+perangkat yang hilang memerlukan enrollment tersendiri.
 Verifikasi segmen belum membuktikan kelengkapan akhir terhadap manifest bertanda tangan.
 
 ## Struktur dan progres
@@ -74,15 +77,20 @@ Login dan daftarkan perangkat, pasangkan dua akun/perangkat uji melalui undangan
 cocokkan fingerprint kedua pihak lalu pilih policy sebelum merekam. WorkManager
 mengantrekan ciphertext, commit server membuktikan header/hash/chain, dan receipt
 memperbarui status lokal. Saat gagal/token expired, data lokal tetap tersedia.
-Distribusi share dan pemulihan inti M3 belum terhubung ke UI/backend;
-sync M2 tetap mempertahankan DEK lokal. Signed manifest/checkpoint M4 belum diimplementasikan.
+M3 menghubungkan distribusi share HPKE, acknowledgment, permintaan/persetujuan,
+pembatalan dan pemulihan melalui klien Android serta API. DEK lokal dipertahankan
+sampai seluruh syarat retirement dan persetujuan eksplisit terpenuhi.
+Signed manifest/checkpoint M4 belum diimplementasikan.
+Lihat [panduan integrasi M3](docs/m3-integration.md) untuk alur dan pengujian lokal.
 
 ## Inti M3 — Orang 2
 
 `core.keyExchange` menyediakan pin public key, envelope HPKE bertanda tangan,
 acknowledgment, request/release, pemulihan threshold dan lifecycle kunci.
 Kontrak transport dan batas integrasi ada di [m3-core-contract.md](docs/m3-core-contract.md).
-Fitur ini belum dihubungkan ke layar/API M3 Orang 1. Rekaman legacy tetap dipertahankan.
+Facade sudah dihubungkan ke layar, worker dan kontrak HTTP M3. Request bertahan
+setelah restart, worker tidak menyetujui akses otomatis, dan peminta dapat mengimpor
+ciphertext setelah threshold terpenuhi. Rekaman legacy tetap dipertahankan.
 
 Tes lokal tanpa emulator/server:
 
@@ -94,5 +102,7 @@ node scripts/verify-m3-signatures.ts
 ```
 
 Tes memakai Tink/JCA sebenarnya, tanpa simulasi Android Keystore. Fixture signature
-publik berlabel JVM; tidak berisi private key atau share plaintext. Tes Android M3
-masih menunggu kapasitas emulator/perangkat uji; hasil aktual dicatat di progres.
+publik berlabel JVM; tidak berisi private key atau share plaintext. Pengujian integrasi Android M3 memakai
+perangkat fisik ADB melalui `scripts/verify-m3-android.ps1`. Supabase hosted sengaja
+ditunda sampai pengguna menyiapkan environment; hasil fixture tidak menggantikan
+validasi provider atau beberapa ponsel fisik.

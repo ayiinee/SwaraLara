@@ -20,9 +20,10 @@ import javax.crypto.spec.GCMParameterSpec
 
 class CloudError(val status: Int,val code: String): Exception(code)
 data class CloudSession(val userId: UUID,val accessToken: String,val refreshToken: String,val expiresAt: Long)
-class SessionStore(context: Context,private val origin: String) {
+class SessionStore(context: Context,private val origin: String, namespace: String = "v1") {
+    init {require(namespace.matches(Regex("[a-z0-9-]{1,80}")))}
     companion object { internal val refreshLock=Any(); private val sessionLock=Any() }
-    private val prefs=context.applicationContext.getSharedPreferences("swl-session-v1",Context.MODE_PRIVATE)
+    private val prefs=context.applicationContext.getSharedPreferences("swl-session-$namespace",Context.MODE_PRIVATE)
     private fun key(): javax.crypto.SecretKey {
         val store=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
         (store.getKey("swl.session.v1",null) as? javax.crypto.SecretKey)?.let {return it}
@@ -95,6 +96,10 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
     }
     private fun parsedSession(j: JSONObject): CloudSession = CloudSession(UUID.fromString(j.getJSONObject("user").getString("id")),j.getString("access_token"),j.getString("refresh_token"),
         System.currentTimeMillis()+j.optLong("expires_in",3600)*1000)
+    suspend fun encryptedObject(url: String): ByteArray = withContext(Dispatchers.IO) {
+        sameOrigin(url)
+        http(url,"GET").also {require(it.size<=384098) {"OBJECT_TOO_LARGE"}}
+    }
     private fun session(j: JSONObject)=parsedSession(j).also(sessions::save)
     suspend fun login(email: String,password: String)=withContext(Dispatchers.IO){session(JSONObject(String(http("$baseUrl/auth/v1/token?grant_type=password","POST",JSONObject().put("email",email).put("password",password).toString().toByteArray()))))}
     suspend fun signup(email: String,password: String)=withContext(Dispatchers.IO){
@@ -120,7 +125,12 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
             .put("hpkePublicKeysetBase64",identity.hpkePublicKeysetBase64).put("signingPublicSpkiBase64",identity.signingPublicSpkiBase64).put("proofSignatureBase64",identity.proofSignatureBase64))
     }
     suspend fun links()=api("/trust") as JSONArray
-    suspend fun confirm(link: JSONObject,identity: DeviceIdentity) {
+    suspend fun confirm(link: JSONObject,identity: DeviceIdentity, exchange: SecureKeyExchange? = null) {
+        if(exchange!=null) for(role in listOf("ownerDevice","holderDevice")) {
+            val peer=link.getJSONObject(role)
+            exchange.pinTrustedDevice(UUID.fromString(peer.getString("userId")),M3TransportCodec.publicDevice(peer),
+                peer.getString("hpke_fingerprint"),peer.getString("signing_fingerprint"))
+        }
         api("/trust/${UUID.fromString(link.getString("id"))}/confirm","POST",JSONObject().put("deviceId",identity.publicIdentity().deviceId)
             .put("signatureBase64",identity.trustConfirmation(UUID.fromString(link.getString("id")))))
         sessions.pin(link)
@@ -147,119 +157,4 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
     }
 
     // ── M3: Distribusi envelope ──────────────────────────────────────────────
-    suspend fun uploadEnvelopes(
-        recordingId: UUID,
-        envelopes: List<ShareEnvelope>,
-    ): List<EnvelopeUploadReceipt> = withContext(Dispatchers.IO) {
-        val arr = org.json.JSONArray()
-        envelopes.forEach { e -> arr.put(JSONObject(M3Json.envelope(e))) }
-        val resp = api("/recordings/$recordingId/share-envelopes", "POST",
-            JSONObject().put("envelopes", arr)) as org.json.JSONArray
-        (0 until resp.length()).map { i ->
-            val o = resp.getJSONObject(i)
-            EnvelopeUploadReceipt(
-                UUID.fromString(o.getString("recordingId")),
-                o.getInt("shareIndex"),
-                o.getString("ciphertextHash"),
-                o.getLong("receivedAtServer"),
-            )
-        }
-    }
-
-    suspend fun getMyShare(recordingId: UUID): Pair<SignedPolicyPackage, ShareEnvelope>? =
-        withContext(Dispatchers.IO) {
-            try {
-                val o = api("/recordings/$recordingId/my-share") as JSONObject
-                val policy = SignedPolicyPackage(
-                    o.getJSONObject("policy").getString("snapshotBase64"),
-                    o.getJSONObject("policy").getString("signatureBase64"),
-                )
-                val env = M3Json.envelope(o.getJSONObject("envelope").toString())
-                Pair(policy, env)
-            } catch (e: CloudError) {
-                if (e.status == 404) null else throw e
-            }
-        }
-
-    suspend fun ackShare(
-        recordingId: UUID,
-        ack: DeviceSignedAction,
-    ): Unit = withContext(Dispatchers.IO) {
-        api("/recordings/$recordingId/my-share/ack", "POST",
-            JSONObject(M3Json.action(ack)))
-        Unit
-    }
-
-    // ── M3: Access requests ──────────────────────────────────────────────────
-    suspend fun createAccessRequest(request: KeyAccessRequest): UUID =
-        withContext(Dispatchers.IO) {
-            val o = api("/access-requests", "POST",
-                JSONObject(M3Json.request(request))) as JSONObject
-            UUID.fromString(o.getString("requestId"))
-        }
-
-    suspend fun getAccessRequests(): List<KeyAccessRequest> =
-        withContext(Dispatchers.IO) {
-            val arr = api("/access-requests") as org.json.JSONArray
-            (0 until arr.length()).map { i -> M3Json.request(arr.getJSONObject(i).toString()) }
-        }
-
-    suspend fun approveRelease(
-        requestId: UUID,
-        release: ShareRelease,
-    ): Unit = withContext(Dispatchers.IO) {
-        api("/access-requests/$requestId/decision", "POST",
-            JSONObject().put("approved", true).put("release", JSONObject(M3Json.release(release))))
-        Unit
-    }
-
-    /** Send the signed decision fields required by the Edge API. */
-    suspend fun submitDecision(request: KeyAccessRequest, identity: DeviceIdentity, release: ShareRelease?) {
-        val deviceId = identity.publicIdentity().deviceId
-        val snapshot = java.nio.ByteBuffer.wrap(decodeBase64(request.policy.snapshotBase64))
-        require(snapshot.remaining() in setOf(248, 345) && snapshot.int == 0x53575031)
-        snapshot.position(53)
-        val count = snapshot.get().toInt()
-        require(count in 2..3 && snapshot.remaining() == count * 97)
-        var ownIndex: Int? = null
-        repeat(count) {
-            val index = snapshot.get().toInt()
-            snapshot.position(snapshot.position() + 16)
-            val memberDevice = UUID(snapshot.long, snapshot.long)
-            snapshot.position(snapshot.position() + 64)
-            if (memberDevice == deviceId) ownIndex = index
-        }
-        val index = requireNotNull(ownIndex) { "DEVICE_NOT_IN_POLICY" }
-        require(release == null || (release.requestId == request.requestId &&
-            release.recordingId == request.recordingId && release.holderDeviceId == deviceId && release.shareIndex == index))
-        val decision = if (release == null) "deny" else "approve"
-        val bytes = "$decision:${request.requestId}:$index".toByteArray(Charsets.UTF_8)
-        val payload = JSONObject().put("decision", decision).put("holderDeviceId", deviceId)
-            .put("shareIndex", index).put("signedDecisionBase64", encodeBase64(bytes))
-            .put("decisionSignatureBase64", encodeBase64(identity.sign(bytes)))
-        release?.let {
-            payload.put("releaseCiphertextBase64", it.ciphertextBase64)
-                .put("contextBytesBase64", it.contextBase64)
-                .put("holderSignatureBase64", it.holderSignatureBase64)
-                .put("ciphertextSha256", it.ciphertextHash)
-        }
-        api("/access-requests/${request.requestId}/decision", "POST", payload)
-    }
-
-    suspend fun getReleases(
-        requestId: UUID,
-        auth: DeviceSignedAction,
-    ): List<ShareRelease> = withContext(Dispatchers.IO) {
-        val arr = api("/access-requests/$requestId/releases?auth=${java.net.URLEncoder.encode(M3Json.action(auth), "UTF-8")}") as org.json.JSONArray
-        (0 until arr.length()).map { i -> M3Json.release(arr.getJSONObject(i).toString()) }
-    }
-
-    suspend fun cancelRequest(
-        requestId: UUID,
-        cancel: DeviceSignedAction,
-    ): Unit = withContext(Dispatchers.IO) {
-        api("/access-requests/$requestId/cancel", "POST",
-            JSONObject(M3Json.action(cancel)))
-        Unit
-    }
 }

@@ -30,6 +30,7 @@ class EnvelopeWorker(context: Context, parameters: WorkerParameters) :
             val receipts = client.uploadEnvelopes(id, envelopes)
             // Acknowledge each receipt through core (updates local DB)
             receipts.forEach { receipt -> core.keyExchange.acknowledgeEnvelopeUpload(receipt) }
+            M3Sync.refresh(core,client)
             Result.success()
         } catch (e: CancellationException) {
             throw e

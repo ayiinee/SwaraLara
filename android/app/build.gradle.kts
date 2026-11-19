@@ -8,7 +8,7 @@ plugins {
 val localConfig = Properties().apply {
     rootProject.file("local.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
 }
-fun configString(name: String) = "\"" + localConfig.getProperty(name, "").replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+fun configString(name: String) = "\"" + providers.gradleProperty(name).getOrElse(localConfig.getProperty(name, "")).replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 android {
     namespace = "id.swaralara.app"
     compileSdk = 35
@@ -33,4 +33,16 @@ dependencies {
     androidTestImplementation(libs.test.runner)
     androidTestImplementation(libs.test.ext)
     androidTestImplementation(libs.test.rules)
+    androidTestImplementation(libs.room.runtime)
+    androidTestImplementation(project(":core-crypto"))
+}
+
+// Instrumented integration actors use isolated core namespaces/databases on a physical device.
+// Friend access is limited to the test compilation and does not expose test hooks in the app.
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    if (name == "compileDebugAndroidTestKotlin") {
+        kotlinOptions.freeCompilerArgs += "-Xfriend-paths=" + project(":recording-core").layout.buildDirectory
+            .file("intermediates/compile_library_classes_jar/debug/bundleLibCompileToJarDebug/classes.jar").get().asFile.absolutePath +
+            "," + layout.buildDirectory.dir("tmp/kotlin-classes/debug").get().asFile.absolutePath
+    }
 }

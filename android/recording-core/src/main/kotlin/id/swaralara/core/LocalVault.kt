@@ -8,6 +8,8 @@ import java.security.MessageDigest
 import java.security.SecureRandom
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -22,6 +24,134 @@ internal class LocalVault(
 ) : SecureVault {
     private val dao = db.dao()
     private val keyLocks = java.util.concurrent.ConcurrentHashMap<UUID, Mutex>()
+
+    override suspend fun importEncryptedRecording(
+        recording: RemoteRecordingPackage,
+        objects: Flow<ByteArray>,
+    ) =
+        withContext(Dispatchers.IO) {
+            val p = M3Wire.policy(recording.policy)
+            val own = requireNotNull(identity).publicIdentity()
+            require(
+                p.policy.members.any {
+                    it.deviceId == own.deviceId &&
+                        it.hpkeFingerprint == own.hpkeFingerprint &&
+                        it.signingFingerprint == own.signingFingerprint
+                }
+            )
+            val owner =
+                requireNotNull(dao.trusted(p.policy.sourceDeviceId.toString())) {
+                    "TRUSTED_KEY_UNAVAILABLE"
+                }
+            require(owner.signingFingerprint == p.policy.members.first().signingFingerprint)
+            M3Wire.verify(
+                owner.signingSpkiBase64,
+                M3Wire.decodeBounded(recording.policy.snapshotBase64, 512),
+                recording.policy.signatureBase64,
+            )
+            require(
+                recording.kind in setOf("live_event", "retrospective") &&
+                    recording.sampleRate in setOf(16000, 44100, 48000) &&
+                    recording.segmentCount in 1..100000 &&
+                    recording.totalFrames > 0 &&
+                    recording.finalCapture in setOf(CaptureState.SEALED, CaptureState.INTERRUPTED)
+            )
+            withKeyLifecycle(p.id) {
+                val existing = dao.recording(p.id.toString())
+                require(dao.key(p.id.toString()) == null) { "LOCAL_RECORDING_EXISTS" }
+                if (existing == null)
+                    db.withTransaction {
+                        dao.insert(
+                            LocalRecording(
+                                p.id.toString(),
+                                recording.kind,
+                                recording.startedAtDevice,
+                                captureState = "INTERRUPTED",
+                                syncState = "PARTIAL",
+                                recoveryState = "ENVELOPES_UPLOADED",
+                                integrityState = "KEY_REQUIRED",
+                                sampleRate = recording.sampleRate,
+                                durationSamples = recording.totalFrames,
+                                segmentCount = recording.segmentCount,
+                                policyCode = p.policy.policyCode,
+                            )
+                        )
+                        dao.cloud(
+                            LocalCloudRegistration(
+                                p.id.toString(),
+                                p.policy.ownerUserId.toString(),
+                                p.policy.json(),
+                                recording.policy.snapshotBase64,
+                                recording.policy.signatureBase64,
+                            )
+                        )
+                    }
+                else {
+                    val stored = requireNotNull(dao.cloud(p.id.toString()))
+                    require(
+                        stored.snapshotBase64 == recording.policy.snapshotBase64 &&
+                            existing.segmentCount == recording.segmentCount &&
+                            existing.durationSamples == recording.totalFrames &&
+                            existing.sampleRate == recording.sampleRate
+                    ) {
+                        "IMPORT_CONFLICT"
+                    }
+                }
+                var index = 0L
+                var frames = 0L
+                var previous = ByteArray(32)
+                var prefix: ByteArray? = null
+                val indexed = dao.segments(p.id.toString()).associateBy { it.segmentIndex }
+                objects.collect { bytes ->
+                    val h = Segments.parse(bytes)
+                    require(
+                        h.recordingId == p.id &&
+                            h.index == index &&
+                            index < recording.segmentCount &&
+                            h.sampleRate == recording.sampleRate &&
+                            h.previousObjectHash.contentEquals(previous)
+                    ) {
+                        "IMPORT_BINDING"
+                    }
+                    val currentPrefix = h.nonce.copyOfRange(0, 8)
+                    require(prefix == null || prefix!!.contentEquals(currentPrefix)) {
+                        "NONCE_PREFIX"
+                    }
+                    prefix = currentPrefix
+                    val target = file(p.id, index)
+                    val old = indexed[index]
+                    val digest = Segments.hex(Segments.hash(bytes))
+                    require(old == null || old.ciphertextSha256 == digest) { "IMMUTABLE_SEGMENT" }
+                    if (target.exists())
+                        require(target.readBytes().contentEquals(bytes)) { "IMMUTABLE_SEGMENT" }
+                    else {
+                        val tmp = File(target.parentFile, "$index.tmp")
+                        FileOutputStream(tmp).use {
+                            it.write(bytes)
+                            it.fd.sync()
+                        }
+                        check(tmp.renameTo(target)) { "ATOMIC_RENAME" }
+                    }
+                    if (old == null) dao.segment(row(target, bytes))
+                    frames += h.sampleCount
+                    previous = Segments.hash(bytes)
+                    index++
+                }
+                require(
+                    index == recording.segmentCount.toLong() && frames == recording.totalFrames
+                ) {
+                    "INCOMPLETE_IMPORT"
+                }
+                val row = requireNotNull(dao.recording(p.id.toString()))
+                dao.update(
+                    row.copy(
+                        captureState = recording.finalCapture.name,
+                        syncState = "SYNCED",
+                        integrityState = "KEY_REQUIRED",
+                    )
+                )
+            }
+        }
 
     internal suspend fun <T> withKeyLifecycle(id: UUID, block: suspend () -> T): T =
         keyLocks.getOrPut(id) { Mutex() }.withLock { block() }
@@ -227,7 +357,8 @@ internal class LocalVault(
         withContext(Dispatchers.IO) {
             if (
                 dao.key(recordingId.toString()) == null &&
-                    dao.retirement(recordingId.toString()) != null
+                    (dao.retirement(recordingId.toString()) != null ||
+                        dao.cloud(recordingId.toString()) != null)
             ) {
                 val temporary = recoveredKeys.copy(recordingId)
                 if (temporary == null) {
@@ -249,7 +380,8 @@ internal class LocalVault(
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 if (
                     dao.key(recordingId.toString()) == null &&
-                        dao.retirement(recordingId.toString()) != null
+                        (dao.retirement(recordingId.toString()) != null ||
+                            dao.cloud(recordingId.toString()) != null)
                 ) {
                     val lease = recoveredKeys.copy(recordingId)
                     if (lease == null) {
@@ -422,10 +554,11 @@ internal class LocalVault(
                 val wasActive = recording.captureState in setOf("STARTING", "RECORDING", "STOPPING")
                 val canReconcile = wasActive || recording.captureState == "FAILED"
                 if (wasActive) capture(id, CaptureState.INTERRUPTED)
-                if (dao.retirement(recording.id) != null && dao.key(recording.id) == null) {
-                    KeyProtector.destroyRecordingKey(
-                        id
-                    ) // Complete an interrupted post-commit Keystore deletion.
+                if (
+                    (dao.retirement(recording.id) != null || dao.cloud(recording.id) != null) &&
+                        dao.key(recording.id) == null
+                ) {
+                    if (dao.retirement(recording.id) != null) KeyProtector.destroyRecordingKey(id)
                     // A deliberately retired key is a locked recording, not evidence of corrupt
                     // audio.
                     dao.integrity(recording.id, "KEY_REQUIRED")
