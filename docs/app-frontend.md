@@ -32,13 +32,17 @@ Konfigurasi Edge API menggunakan `supabase/.env.example`.
 
 ```powershell
 cd android
-.\gradlew.bat :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug :core-crypto:test :recording-core:testDebugUnitTest
-.\gradlew.bat :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=id.swaralara.app.FrontendFlowTest
+.\gradlew.bat :app:assembleDebug :app:lintDebug :core-crypto:test :recording-core:testDebugUnitTest
+cd ..
+python scripts/verify_frontend_ui.py --adb D:/Android/Sdk/platform-tools/adb.exe --serial <serial-perangkat>
 ```
 
-`FrontendFlowTest` memeriksa navigasi, pembatalan tekan singkat, rekaman mikrofon
-sebenarnya, penyimpanan, pemeriksaan integritas, serta persiapan/pemutaran/penutupan audio.
-Tes dijalankan pada perangkat fisik ADB Android 13+ dengan mikrofon.
+`scripts/verify_frontend_ui.py` memakai ADB dan hierarki aksesibilitas Android untuk
+memeriksa navigasi, pembatalan tekan singkat, rekaman mikrofon sebenarnya, penyimpanan,
+pemeriksaan integritas, serta persiapan/pemutaran/penutupan audio. Skrip tidak memerlukan
+Espresso atau dependensi Python tambahan. Pasang APK debug terlebih dahulu, izinkan
+mikrofon, lalu biarkan ponsel tanpa disentuh selama tes. Screenshot disimpan di
+`.tools/frontend`. Tes dijalankan pada perangkat fisik ADB dengan mikrofon.
 Jangan menjalankan emulator untuk proyek ini di mesin pengguna.
 Pastikan tidak ada sesi lain yang membuat Android membisukan mikrofon aplikasi.
 
