@@ -52,6 +52,16 @@ Branch inti mengikuti brief: `feat/recording-crypto`; task M2 memakai `feat/app-
 Commit dan push dilakukan sesuai permintaan pengguna. Database hosted belum diubah.
 Rekaman `demo_2of3` tidak dapat diunggah sebagai rekaman integrated.
 
+## Tampilan aplikasi dan konfigurasi
+
+Aplikasi utama memakai layar Beranda, Brankas, Perangkat, Akses, dan Pengaturan
+dengan tema plum/lilac sesuai referensi desain. Lihat [panduan frontend](docs/app-frontend.md).
+Contoh konfigurasi publik ada di [`.env.example`](.env.example),
+[`android/local.properties.example`](android/local.properties.example), dan
+[`supabase/.env.example`](supabase/.env.example). Android membaca `local.properties`;
+`.env.example` adalah template dan tidak dimuat otomatis.
+Gunakan perangkat fisik ADB atau preview web localhost untuk verifikasi UI; jangan jalankan emulator.
+
 ## Backend dan integrasi Android M2
 
 Node 24+: `npm ci`, lalu `npm test`. Test suite menjalankan migration PostgreSQL

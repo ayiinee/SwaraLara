@@ -213,6 +213,39 @@ class CloudClient(val baseUrl: String,private val publishable: String,val sessio
         Unit
     }
 
+    /** Send the signed decision fields required by the Edge API. */
+    suspend fun submitDecision(request: KeyAccessRequest, identity: DeviceIdentity, release: ShareRelease?) {
+        val deviceId = identity.publicIdentity().deviceId
+        val snapshot = java.nio.ByteBuffer.wrap(decodeBase64(request.policy.snapshotBase64))
+        require(snapshot.remaining() in setOf(248, 345) && snapshot.int == 0x53575031)
+        snapshot.position(53)
+        val count = snapshot.get().toInt()
+        require(count in 2..3 && snapshot.remaining() == count * 97)
+        var ownIndex: Int? = null
+        repeat(count) {
+            val index = snapshot.get().toInt()
+            snapshot.position(snapshot.position() + 16)
+            val memberDevice = UUID(snapshot.long, snapshot.long)
+            snapshot.position(snapshot.position() + 64)
+            if (memberDevice == deviceId) ownIndex = index
+        }
+        val index = requireNotNull(ownIndex) { "DEVICE_NOT_IN_POLICY" }
+        require(release == null || (release.requestId == request.requestId &&
+            release.recordingId == request.recordingId && release.holderDeviceId == deviceId && release.shareIndex == index))
+        val decision = if (release == null) "deny" else "approve"
+        val bytes = "$decision:${request.requestId}:$index".toByteArray(Charsets.UTF_8)
+        val payload = JSONObject().put("decision", decision).put("holderDeviceId", deviceId)
+            .put("shareIndex", index).put("signedDecisionBase64", encodeBase64(bytes))
+            .put("decisionSignatureBase64", encodeBase64(identity.sign(bytes)))
+        release?.let {
+            payload.put("releaseCiphertextBase64", it.ciphertextBase64)
+                .put("contextBytesBase64", it.contextBase64)
+                .put("holderSignatureBase64", it.holderSignatureBase64)
+                .put("ciphertextSha256", it.ciphertextHash)
+        }
+        api("/access-requests/${request.requestId}/decision", "POST", payload)
+    }
+
     suspend fun getReleases(
         requestId: UUID,
         auth: DeviceSignedAction,

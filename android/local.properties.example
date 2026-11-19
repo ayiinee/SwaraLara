@@ -1,6 +1,8 @@
 sdk.dir=D:/Android/Sdk
-# Opsional untuk app M2; core-demo selalu berjalan tanpa backend.
+# Opsional untuk aplikasi; rekaman lokal tetap berjalan tanpa backend.
 # SUPABASE_URL=https://your-project.supabase.co
 # SUPABASE_PUBLISHABLE_KEY=your-publishable-key
-# Emulator + Supabase lokal: SUPABASE_URL=http://10.0.2.2:54321 (debug saja)
+# Perangkat ADB + Supabase lokal (debug saja):
+# adb reverse tcp:54321 tcp:54321
+# SUPABASE_URL=http://127.0.0.1:54321
 # Jangan memasukkan service-role/server secret di sini.

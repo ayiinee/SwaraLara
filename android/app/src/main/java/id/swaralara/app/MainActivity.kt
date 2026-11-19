@@ -2,39 +2,63 @@ package id.swaralara.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import id.swaralara.app.backend.*
 import id.swaralara.core.*
+import java.util.UUID
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.catch
 import org.json.JSONObject
-import java.util.UUID
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val core = CoreRuntime.get(applicationContext)
-        setContent { MaterialTheme { Surface(Modifier.fillMaxSize()) { ConnectedScreen(core, this) } } }
+        window.statusBarColor = android.graphics.Color.rgb(250, 244, 252)
+        window.navigationBarColor = android.graphics.Color.rgb(84, 32, 68)
+        window.decorView.systemUiVisibility = android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+        setContent {
+            SwaraTheme {
+                Surface(Modifier.fillMaxSize(), color = Page) { ConnectedScreen(core, this) }
+            }
+        }
     }
-    override fun onStop() { CoreRuntime.get(applicationContext).onHostBackgrounded(); super.onStop() }
+
+    override fun onStop() {
+        CoreRuntime.get(applicationContext).onHostBackgrounded()
+        super.onStop()
+    }
 }
 
-@Composable private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context) {
+@Composable
+private fun ConnectedScreen(core: CoreRuntime, context: android.content.Context) {
     val scope = rememberCoroutineScope()
     val url = BuildConfig.SUPABASE_URL.trimEnd('/')
     val sessions = remember { SessionStore(context, url) }
     val client = remember {
         if (url.isBlank() || BuildConfig.SUPABASE_PUBLISHABLE_KEY.isBlank()) null
-        else runCatching { CloudClient(url, BuildConfig.SUPABASE_PUBLISHABLE_KEY, sessions) }.getOrNull()
+        else
+            runCatching { CloudClient(url, BuildConfig.SUPABASE_PUBLISHABLE_KEY, sessions) }
+                .getOrNull()
     }
     var session by remember { mutableStateOf(sessions.load()) }
     var email by remember { mutableStateOf("") }
@@ -43,7 +67,7 @@ class MainActivity : ComponentActivity() {
     var invitation by remember { mutableStateOf("") }
     var links by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
     var policy by remember { mutableStateOf<CloudCapturePolicy?>(null) }
-    var status by remember { mutableStateOf("Rekam lokal tetap tersedia tanpa login.") }
+    var status by remember { mutableStateOf("") }
     var working by remember { mutableStateOf(false) }
 
     // M3: inbox persetujuan pemegang
@@ -51,24 +75,30 @@ class MainActivity : ComponentActivity() {
     // M3: requestId aktif per recordingId (untuk pemulihan DEK)
     var activeRequestIds by remember { mutableStateOf<Map<UUID, UUID>>(emptyMap()) }
 
-    val recordingFlow = remember(core) {
-        core.vault.observeRecordings()
-            .catch { status = "Brankas belum dapat dibaca. Data lokal dipertahankan."; emit(emptyList()) }
-    }
+    val recordingFlow =
+        remember(core) {
+            core.vault.observeRecordings().catch {
+                status = "Brankas belum dapat dibaca. Data lokal dipertahankan."
+                emit(emptyList())
+            }
+        }
     val recordings by recordingFlow.collectAsStateWithLifecycle(emptyList())
     val capture by core.recorder.state.collectAsStateWithLifecycle()
 
     fun action(block: suspend () -> Unit) {
-        if (working) return; working = true
+        if (working) return
+        working = true
         scope.launch {
             try {
-                core.awaitReady(); block()
+                core.awaitReady()
+                block()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: CloudError) {
                 status = "Backend: ${e.code} (${e.status}). Data lokal dipertahankan."
             } catch (_: Exception) {
-                status = "Operasi belum berhasil. Periksa konfigurasi, koneksi, identitas perangkat, dan izin."
+                status =
+                    "Operasi belum berhasil. Periksa konfigurasi, koneksi, identitas perangkat, dan izin."
             } finally {
                 working = false
             }
@@ -83,237 +113,680 @@ class MainActivity : ComponentActivity() {
     // M3: LaunchedEffect — trigger workers saat login & rekaman berubah
     LaunchedEffect(recordings, session?.userId) {
         if (client != null && session != null) {
-            recordings.filter {
-                it.capture in setOf(CaptureState.SEALED, CaptureState.INTERRUPTED)
-                    && it.recovery == RecoveryState.DEGRADED
-                    && it.sync == SyncState.QUEUED
-            }.forEach { UploadWorker.enqueue(context, it.id) }
+            recordings
+                .filter {
+                    it.capture in setOf(CaptureState.SEALED, CaptureState.INTERRUPTED) &&
+                        it.recovery == RecoveryState.DEGRADED &&
+                        it.sync == SyncState.QUEUED
+                }
+                .forEach { UploadWorker.enqueue(context, it.id) }
 
             // M3: enqueue EnvelopeWorker untuk rekaman yang sudah SYNCED & siap distribusi
-            recordings.filter {
-                it.sync == SyncState.SYNCED
-                    && it.recovery == RecoveryState.ENVELOPES_QUEUED
-            }.forEach { EnvelopeWorker.enqueue(context, it.id) }
+            recordings
+                .filter {
+                    it.sync == SyncState.SYNCED && it.recovery == RecoveryState.ENVELOPES_QUEUED
+                }
+                .forEach { EnvelopeWorker.enqueue(context, it.id) }
 
             // M3: poll RecoveryWorker sekali saat login (KEEP — tidak duplikat)
             RecoveryWorker.enqueueOnce(context)
         }
     }
 
-    Column(
-        Modifier
-            .systemBarsPadding()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text("SwaraLara", style = MaterialTheme.typography.headlineMedium)
-        // M3: label versi
-        Text("M3 • Distribusi kunci threshold & pemulihan lintas perangkat aktif.")
-
-        if (client == null) {
-            Text("Backend belum dikonfigurasi. Isi SUPABASE_URL dan SUPABASE_PUBLISHABLE_KEY di local.properties lalu build app.")
-        } else if (session == null) {
-            OutlinedTextField(email, { email = it }, label = { Text("Email akun uji") }, singleLine = true)
-            OutlinedTextField(
-                password, { password = it },
-                label = { Text("Kata sandi") },
-                visualTransformation = PasswordVisualTransformation(),
-                singleLine = true
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = !working, onClick = {
-                    action {
-                        session = client.login(email, password); password = ""
-                        client.register(core.identity.publicIdentity()); refresh()
-                        status = "Login dan perangkat terdaftar."
-                    }
-                }) { Text("Login") }
-                OutlinedButton(enabled = !working, onClick = {
-                    action {
-                        session = client.signup(email, password); password = ""
-                        status = if (session == null)
-                            "Konfirmasi email melalui email/Inbox lokal lalu login."
-                        else
-                            "Akun dibuat; login untuk mendaftarkan perangkat."
-                    }
-                }) { Text("Daftar") }
+    var tabName by rememberSaveable { mutableStateOf(Destination.HOME.name) }
+    val tab = Destination.valueOf(tabName)
+    var recordingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var requestId by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingLink by remember { mutableStateOf<JSONObject?>(null) }
+    var auditText by remember { mutableStateOf<String?>(null) }
+    val playback by core.playback.state.collectAsStateWithLifecycle()
+    val selectedRecording = recordings.firstOrNull { it.id.toString() == recordingId }
+    val selectedRequest = accessRequests.firstOrNull { it.requestId.toString() == requestId }
+    val snackbar = remember { SnackbarHostState() }
+    val pageScroll = rememberScrollState()
+    val clipboard = LocalClipboardManager.current
+    LaunchedEffect(tabName, recordingId, requestId) { pageScroll.scrollTo(0) }
+    LaunchedEffect(tabName, session?.userId) {
+        if (client != null && session != null) {
+            if (tab == Destination.DEVICES) action { refresh() }
+            if (tab == Destination.ACCESS) action { accessRequests = client.getAccessRequests() }
+        }
+    }
+    LaunchedEffect(status) {
+        if (status.isNotBlank()) {
+            snackbar.showSnackbar(status)
+            status = ""
+        }
+    }
+    LaunchedEffect(capture.errorCode) {
+        capture.errorCode?.let { status = "Perekaman belum berhasil: $it" }
+    }
+    BackHandler(enabled = recordingId != null || requestId != null || tab != Destination.HOME) {
+        if (recordingId != null) {
+            recordingId = null
+            scope.launch { core.playback.release() }
+        } else if (requestId != null) requestId = null else tabName = Destination.HOME.name
+    }
+    fun requireAccount(block: suspend () -> Unit) {
+        if (client == null || session == null) {
+            status = "Masuk ke akun untuk menghubungkan perangkat dan mengelola akses."
+            tabName = Destination.SETTINGS.name
+        } else action(block)
+    }
+    fun decide(req: KeyAccessRequest, approved: Boolean) {
+        requireAccount {
+            if (approved) {
+                val release = core.keyExchange.approveAndRelease(req, userApproved = true)
+                client!!.submitDecision(req, core.identity, release)
+            } else client!!.submitDecision(req, core.identity, null)
+            accessRequests = accessRequests.filterNot { it.requestId == req.requestId }
+            requestId = null
+            status = if (approved) "Persetujuan dikirim." else "Permintaan ditolak."
+        }
+    }
+    if (capture.busy) {
+        RecordingScreen(capture) {
+            scope.launch {
+                try { core.recorder.stop() }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { status = "Gunakan tombol berhenti pada notifikasi jika rekaman belum berhenti." }
             }
-        } else {
-            // ── Informasi akun ──────────────────────────────────────────────
-            Text("Akun: ${session!!.userId}")
-            OutlinedButton(enabled = !working, onClick = {
-                action { client.register(core.identity.publicIdentity()); refresh(); status = "Perangkat dan hubungan dimuat." }
-            }) { Text("Daftarkan perangkat / muat hubungan") }
-
-            Button(enabled = !working, onClick = {
-                action {
-                    val result = client.api("/trust/invitations", "POST",
-                        JSONObject().put("deviceId", core.identity.publicIdentity().deviceId)) as JSONObject
-                    invitation = result.getString("token")
-                    status = "Undangan satu kali, berlaku 15 menit. Bagikan hanya kepada pihak yang dipilih."
+        }
+    } else
+        Scaffold(
+            containerColor = Page,
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                SwaraBottomBar(tab) {
+                    if (recordingId != null) scope.launch { core.playback.release() }
+                    recordingId = null
+                    requestId = null
+                    tabName = it.name
                 }
-            }) { Text("Buat undangan") }
-            if (invitation.isNotEmpty()) Text(invitation)
-
-            OutlinedTextField(token, { token = it }, label = { Text("Token undangan dari pemilik") })
-            OutlinedButton(enabled = !working, onClick = {
-                action {
-                    client.api("/trust/accept", "POST",
-                        JSONObject().put("token", token).put("deviceId", core.identity.publicIdentity().deviceId))
-                    token = ""; refresh()
-                    status = "Bandingkan fingerprint melalui saluran terpisah sebelum konfirmasi."
-                }
-            }) { Text("Terima undangan") }
-
-            links.forEach { link ->
-                val owner = link.getJSONObject("ownerDevice")
-                val holder = link.getJSONObject("holderDevice")
-                Text("Hubungan ${link.getString("id")} • ${link.getString("state")}")
-                Text("Fingerprint pemilik (signing/HPKE):\n${owner.getString("signing_fingerprint")}\n${owner.getString("hpke_fingerprint")}")
-                Text("Fingerprint pemegang (signing/HPKE):\n${holder.getString("signing_fingerprint")}\n${holder.getString("hpke_fingerprint")}")
-                OutlinedButton(enabled = !working, onClick = {
-                    action { client.confirm(link, core.identity); refresh(); status = "Konfirmasi tersimpan. Kedua pihak wajib mengonfirmasi fingerprint." }
-                }) { Text("Fingerprint sudah saya cocokkan") }
-                if (link.getString("owner_user_id") == session!!.userId.toString() && link.getString("state") == "active") {
-                    Button(enabled = !working && sessions.pinned(link), onClick = {
-                        action {
-                            check(sessions.pinned(link))
-                            val own = core.identity.publicIdentity()
-                            policy = CloudCapturePolicy(
-                                session!!.userId, own.deviceId, "owner_required_2of2",
-                                listOf(
-                                    CloudMember(1, session!!.userId, own.deviceId, own.hpkeFingerprint, own.signingFingerprint),
-                                    CloudMember(2, UUID.fromString(link.getString("holder_user_id")),
-                                        UUID.fromString(holder.getString("id")),
-                                        holder.getString("hpke_fingerprint"),
-                                        holder.getString("signing_fingerprint"))
-                                )
+            },
+        ) { insets ->
+            Column(
+                Modifier.fillMaxSize()
+                    .padding(insets)
+                    .verticalScroll(pageScroll)
+                    .padding(horizontal = 18.dp)
+            ) {
+                when {
+                    selectedRecording != null -> {
+                        val r = selectedRecording
+                        PageHeading(
+                            "Rekaman",
+                            back = {
+                                recordingId = null
+                                scope.launch { core.playback.release() }
+                            },
+                        )
+                        RecordingDetail(
+                            r,
+                            playback,
+                            working,
+                            inspect = { action { status = core.vault.inspect(r.id).message } },
+                            prepare = {
+                                action {
+                                    if (!core.playback.prepare(r.id))
+                                        status = "Rekaman belum dapat diputar."
+                                }
+                            },
+                            audit = {
+                                auditText =
+                                    "ID: ${r.id}\n${r.segmentCount} segmen · ${r.frames} frame\nIntegritas: ${r.integrity}\nSinkronisasi: ${r.sync}\nPemulihan: ${r.recovery}"
+                            },
+                            play = { action { core.playback.play() } },
+                            pause = { action { core.playback.pause() } },
+                            close = { action { core.playback.release() } },
+                        )
+                        if (r.recovery == RecoveryState.DEGRADED)
+                            Pill(
+                                "Unggah / coba lagi",
+                                {
+                                    requireAccount {
+                                        UploadWorker.enqueue(context, r.id)
+                                        status = "Unggah dijadwalkan."
+                                    }
+                                },
+                                Modifier.padding(top = 20.dp),
+                                enabled = !working,
                             )
-                            status = "Rekaman baru memakai snapshot pemilik + satu pemegang. M3 mendistribusikan envelope DEK terenkripsi ke pemegang; pemulihan memerlukan persetujuan threshold."
+                        if (
+                            r.recovery in
+                                setOf(
+                                    RecoveryState.ENVELOPES_QUEUED,
+                                    RecoveryState.ENVELOPES_UPLOADED,
+                                )
+                        )
+                            Pill(
+                                "Distribusi kunci",
+                                {
+                                    requireAccount {
+                                        EnvelopeWorker.enqueue(context, r.id)
+                                        status = "Distribusi kunci dijadwalkan."
+                                    }
+                                },
+                                Modifier.padding(top = 20.dp),
+                            )
+                        if (r.recovery == RecoveryState.HOLDERS_ACKNOWLEDGED) {
+                            val existing = activeRequestIds[r.id]
+                            Pill(
+                                if (existing == null) "Minta pemulihan" else "Pulihkan rekaman",
+                                {
+                                    requireAccount {
+                                        if (existing == null) {
+                                            val request =
+                                                core.keyExchange.createRequest(
+                                                    core.keyExchange.exportPolicy(r.id)
+                                                )
+                                            activeRequestIds =
+                                                activeRequestIds +
+                                                    (r.id to client!!.createAccessRequest(request))
+                                            status = "Permintaan pemulihan dibuat."
+                                        } else {
+                                            val auth =
+                                                core.keyExchange.authorizeReleasesRead(existing)
+                                            status =
+                                                core.keyExchange
+                                                    .recover(
+                                                        existing,
+                                                        client!!.getReleases(existing, auth),
+                                                    )
+                                                    .message
+                                        }
+                                    }
+                                },
+                                Modifier.padding(top = 20.dp),
+                                enabled = !working,
+                            )
                         }
-                    }) { Text("Pilih kebijakan pemilik + pemegang") }
-                }
-            }
-
-            OutlinedButton(onClick = {
-                policy = null; sessions.clear(); session = null
-                links = emptyList(); invitation = ""; accessRequests = emptyList()
-                activeRequestIds = emptyMap()
-                status = "Keluar. Rekaman dan kunci lokal dipertahankan."
-            }) { Text("Keluar") }
-
-            // ── M3: Pemulihan M3 ────────────────────────────────────────────
-            Text("Pemulihan M3", style = MaterialTheme.typography.titleMedium)
-
-            // Distribusi kunci — per rekaman yang siap distribusi
-            val envelopeReady = recordings.filter {
-                it.recovery == RecoveryState.ENVELOPES_QUEUED || it.recovery == RecoveryState.ENVELOPES_UPLOADED
-            }
-            if (envelopeReady.isNotEmpty()) {
-                Text("Distribusi envelope DEK:", style = MaterialTheme.typography.labelLarge)
-                envelopeReady.forEach { r ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("${r.id.toString().take(8)}… • ${recoveryLabel(r.recovery)}", Modifier.weight(1f))
-                        Button(enabled = !working, onClick = {
-                            action { EnvelopeWorker.enqueue(context, r.id); status = "Distribusi kunci dijadwalkan untuk rekaman ${r.id}." }
-                        }) { Text("Distribusi kunci") }
                     }
-                }
-            }
-
-            // Inbox persetujuan pemegang
-            Button(enabled = !working, onClick = {
-                action {
-                    accessRequests = client.getAccessRequests()
-                    status = "Inbox dimuat: ${accessRequests.size} permintaan."
-                }
-            }) { Text("Muat inbox persetujuan") }
-
-            if (accessRequests.isNotEmpty()) {
-                Text("Permintaan akses (${accessRequests.size}):", style = MaterialTheme.typography.labelLarge)
-                accessRequests.forEach { req ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Permintaan ${req.requestId.toString().take(8)}… — rekaman ${req.recordingId.toString().take(8)}…")
-                        Button(enabled = !working, onClick = {
-                            action {
-                                val release = core.keyExchange.approveAndRelease(req, userApproved = true)
-                                client.approveRelease(req.requestId, release)
-                                status = "Persetujuan dikirim untuk permintaan ${req.requestId.toString().take(8)}…"
+                    selectedRequest != null -> {
+                        val req = selectedRequest
+                        PageHeading("Permintaan Akses", back = { requestId = null })
+                        SwaraCard {
+                            Text(
+                                "Menunggu persetujuan",
+                                color = Plum,
+                                fontSize = 21.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Spacer(Modifier.height(2.dp))
+                            Text("Rekaman", color = Muted)
+                            Text(
+                                recordings
+                                    .firstOrNull { it.id == req.recordingId }
+                                    ?.let(::recordingName) ?: req.recordingId.toString().take(12)
+                            )
+                            Text("Peminta", color = Muted)
+                            Text("Perangkat ${req.requesterDeviceId.toString().take(12)}")
+                            Text("Kedaluwarsa", color = Muted)
+                            Text(
+                                if (req.expiresAt <= System.currentTimeMillis()) "Kedaluwarsa"
+                                else "${((req.expiresAt-System.currentTimeMillis())/60000+1)} menit"
+                            )
+                        }
+                        Spacer(Modifier.height(30.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Pill(
+                                "Setujui",
+                                { decide(req, true) },
+                                Modifier.weight(1f),
+                                filled = true,
+                                enabled = !working && req.expiresAt > System.currentTimeMillis(),
+                            )
+                            Pill(
+                                "Tolak",
+                                { decide(req, false) },
+                                Modifier.weight(1f),
+                                filled = true,
+                                pink = true,
+                                enabled = !working,
+                            )
+                        }
+                        Text(
+                            "Persetujuan tidak membuka\nkunci pada server.",
+                            Modifier.fillMaxWidth().padding(top = 50.dp),
+                            color = Muted,
+                            fontSize = 16.sp,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        )
+                    }
+                    tab == Destination.HOME -> {
+                        PageHeading("SwaraLara")
+                        CaptureCard(core, policy) { status = it }
+                        Text(
+                            "Terbaru",
+                            Modifier.padding(top = 18.dp, bottom = 12.dp),
+                            fontSize = 18.sp,
+                        )
+                        if (recordings.isEmpty())
+                            EmptyState(
+                                "Belum ada rekaman",
+                                "Rekaman yang kamu buat akan muncul di sini.",
+                                "mic",
+                            )
+                        recordings.take(3).forEach { r ->
+                            RecordingRow(r) {
+                                tabName = Destination.VAULT.name
+                                recordingId = r.id.toString()
                             }
-                        }) { Text("Setujui & Lepaskan") }
+                            Spacer(Modifier.height(10.dp))
+                        }
                     }
-                }
-            }
-
-            // Minta pemulihan — per rekaman HOLDERS_ACKNOWLEDGED
-            val holdersReady = recordings.filter { it.recovery == RecoveryState.HOLDERS_ACKNOWLEDGED }
-            if (holdersReady.isNotEmpty()) {
-                Text("Siap minta pemulihan:", style = MaterialTheme.typography.labelLarge)
-                holdersReady.forEach { r ->
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("Rekaman ${r.id.toString().take(8)}… — Pemegang siap — dapat meminta pemulihan")
-                        val existingReqId = activeRequestIds[r.id]
-                        if (existingReqId == null) {
-                            Button(enabled = !working, onClick = {
-                                action {
-                                    val policyPkg = core.keyExchange.exportPolicy(r.id)
-                                    val request = core.keyExchange.createRequest(policyPkg)
-                                    val createdReqId = client.createAccessRequest(request)
-                                    activeRequestIds = activeRequestIds + (r.id to createdReqId)
-                                    status = "Permintaan pemulihan dibuat: $createdReqId"
+                    tab == Destination.VAULT -> {
+                        PageHeading("Brankas")
+                        if (recordings.isEmpty())
+                            EmptyState(
+                                "Brankas masih kosong",
+                                "Mulai rekaman dari Beranda.",
+                                "lock",
+                            )
+                        recordings.forEach { r ->
+                            RecordingRow(r) { recordingId = r.id.toString() }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+                    tab == Destination.DEVICES -> {
+                        PageHeading("Perangkat")
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Pill(
+                                "Daftarkan",
+                                {
+                                    requireAccount {
+                                        client!!.register(core.identity.publicIdentity())
+                                        refresh()
+                                        status = "Perangkat terdaftar."
+                                    }
+                                },
+                                filled = true,
+                                enabled = !working,
+                            )
+                            Pill(
+                                "Undang",
+                                {
+                                    requireAccount {
+                                        val result =
+                                            client!!.api(
+                                                "/trust/invitations",
+                                                "POST",
+                                                JSONObject()
+                                                    .put(
+                                                        "deviceId",
+                                                        core.identity.publicIdentity().deviceId,
+                                                    ),
+                                            ) as JSONObject
+                                        invitation = result.getString("token")
+                                    }
+                                },
+                                enabled = !working,
+                            )
+                        }
+                        if (invitation.isNotBlank()) {
+                            Spacer(Modifier.height(16.dp))
+                            SwaraCard {
+                                Text("Undangan · berlaku 15 menit", color = Plum)
+                                SelectionContainer { Text(invitation) }
+                                Pill(
+                                    "Salin token",
+                                    {
+                                        clipboard.setText(AnnotatedString(invitation))
+                                        status = "Token disalin."
+                                    },
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(22.dp))
+                        OutlinedTextField(
+                            token,
+                            { token = it },
+                            Modifier.fillMaxWidth(),
+                            label = { Text("Token") },
+                            singleLine = true,
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = {
+                                        clipboard.setText(AnnotatedString(token))
+                                        status = "Token disalin."
+                                    },
+                                    enabled = token.isNotBlank(),
+                                ) {
+                                    SwaraIcon("copy")
                                 }
-                            }) { Text("Minta pemulihan") }
-                        } else {
-                            Text("RequestId aktif: ${existingReqId.toString().take(8)}…")
-                            Button(enabled = !working, onClick = {
-                                action {
-                                    val auth = core.keyExchange.authorizeReleasesRead(existingReqId)
-                                    val releases = client.getReleases(existingReqId, auth)
-                                    core.keyExchange.recover(existingReqId, releases)
-                                    status = "DEK berhasil dipulihkan untuk rekaman ${r.id.toString().take(8)}…"
+                            },
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Pill(
+                            "Hubungkan",
+                            {
+                                requireAccount {
+                                    client!!.api(
+                                        "/trust/accept",
+                                        "POST",
+                                        JSONObject()
+                                            .put("token", token)
+                                            .put(
+                                                "deviceId",
+                                                core.identity.publicIdentity().deviceId,
+                                            ),
+                                    )
+                                    token = ""
+                                    refresh()
+                                    status =
+                                        "Cocokkan fingerprint kedua perangkat sebelum konfirmasi."
                                 }
-                            }) { Text("Ambil releases & pulihkan") }
+                            },
+                            Modifier.fillMaxWidth(),
+                            filled = true,
+                            enabled = !working && token.isNotBlank(),
+                        )
+                        Spacer(Modifier.height(24.dp))
+                        links.forEach { link ->
+                            val owner = link.getJSONObject("ownerDevice")
+                            val holder = link.getJSONObject("holderDevice")
+                            SwaraCard {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                ) {
+                                    SwaraIcon("devices")
+                                    Text("holder ${link.getString("state")}")
+                                }
+                                Text(holder.getString("id").take(16))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Pill(
+                                        "Salin",
+                                        {
+                                            clipboard.setText(
+                                                AnnotatedString(
+                                                    "Pemilik: ${owner.getString("signing_fingerprint")} / ${owner.getString("hpke_fingerprint")}\nPemegang: ${holder.getString("signing_fingerprint")} / ${holder.getString("hpke_fingerprint")}"
+                                                )
+                                            )
+                                            status = "Fingerprint disalin."
+                                        },
+                                    )
+                                    Pill(
+                                        "Konfirmasi",
+                                        {
+                                            auditText =
+                                                "Fingerprint pemilik\n${owner.getString("signing_fingerprint")}\n${owner.getString("hpke_fingerprint")}\n\nFingerprint pemegang\n${holder.getString("signing_fingerprint")}\n${holder.getString("hpke_fingerprint")}"
+                                            pendingLink = link
+                                        },
+                                        enabled = !working && !sessions.pinned(link),
+                                    )
+                                }
+                                if (
+                                    link.getString("owner_user_id") == session?.userId.toString() &&
+                                        link.getString("state") == "active" &&
+                                        sessions.pinned(link)
+                                ) {
+                                    Pill(
+                                        "Gunakan untuk rekaman",
+                                        {
+                                            action {
+                                                val own = core.identity.publicIdentity()
+                                                policy =
+                                                    CloudCapturePolicy(
+                                                        session!!.userId,
+                                                        own.deviceId,
+                                                        "owner_required_2of2",
+                                                        listOf(
+                                                            CloudMember(
+                                                                1,
+                                                                session!!.userId,
+                                                                own.deviceId,
+                                                                own.hpkeFingerprint,
+                                                                own.signingFingerprint,
+                                                            ),
+                                                            CloudMember(
+                                                                2,
+                                                                UUID.fromString(
+                                                                    link.getString("holder_user_id")
+                                                                ),
+                                                                UUID.fromString(
+                                                                    holder.getString("id")
+                                                                ),
+                                                                holder.getString(
+                                                                    "hpke_fingerprint"
+                                                                ),
+                                                                holder.getString(
+                                                                    "signing_fingerprint"
+                                                                ),
+                                                            ),
+                                                        ),
+                                                    )
+                                                status =
+                                                    "Perangkat terpercaya dipilih untuk rekaman baru."
+                                            }
+                                        },
+                                        enabled = !working,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        if (links.isEmpty())
+                            EmptyState(
+                                "Belum ada perangkat",
+                                "Daftarkan perangkat atau hubungkan dengan token undangan.",
+                                "devices",
+                            )
+                    }
+                    tab == Destination.ACCESS -> {
+                        PageHeading(
+                            "Akses",
+                            trailing = {
+                                TextButton(
+                                    onClick = {
+                                        requireAccount {
+                                            accessRequests = client!!.getAccessRequests()
+                                            status = "Permintaan akses dimuat."
+                                        }
+                                    },
+                                    enabled = !working,
+                                ) {
+                                    Text("Muat ulang", fontSize = 12.sp)
+                                }
+                            },
+                        )
+                        if (accessRequests.isEmpty())
+                            EmptyState(
+                                "Belum ada permintaan",
+                                "Permintaan akses rekaman akan muncul di sini.",
+                                "inbox",
+                            )
+                        accessRequests.forEach { req ->
+                            SwaraCard(Modifier.clickable { requestId = req.requestId.toString() }) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text("Pending", fontWeight = FontWeight.Medium)
+                                    Text(
+                                        java.text
+                                            .SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+                                            .format(java.util.Date(req.expiresAt)),
+                                        fontSize = 10.sp,
+                                        color = Muted,
+                                    )
+                                }
+                                Text(
+                                    "Pendamping terpercaya · ${req.requesterDeviceId.toString().take(8)}…",
+                                    fontSize = 13.sp,
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Badge("threshold")
+                                    Badge("device-${req.requesterDeviceId.toString().take(4)}")
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Pill(
+                                        "Tolak",
+                                        { decide(req, false) },
+                                        filled = true,
+                                        enabled = !working,
+                                    )
+                                    Pill(
+                                        "Setujui",
+                                        { requestId = req.requestId.toString() },
+                                        enabled = !working,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(12.dp))
+                        }
+                    }
+                    tab == Destination.SETTINGS -> {
+                        PageHeading("Pengaturan")
+                        SwaraCard {
+                            Text("Akun", fontSize = 20.sp, color = Plum)
+                            if (client == null) {
+                                Text(
+                                    "Rekam dan simpan di perangkat ini. Layanan akun belum tersedia.",
+                                    color = Muted,
+                                )
+                            } else if (session == null) {
+                                Text(
+                                    "Masuk untuk menghubungkan perangkat terpercaya dan mengelola akses.",
+                                    color = Muted,
+                                    fontSize = 14.sp,
+                                )
+                                OutlinedTextField(
+                                    email,
+                                    { email = it },
+                                    Modifier.fillMaxWidth(),
+                                    label = { Text("Email") },
+                                    singleLine = true,
+                                )
+                                OutlinedTextField(
+                                    password,
+                                    { password = it },
+                                    Modifier.fillMaxWidth(),
+                                    label = { Text("Kata sandi") },
+                                    singleLine = true,
+                                    visualTransformation = PasswordVisualTransformation(),
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Pill(
+                                        "Masuk",
+                                        {
+                                            action {
+                                                session = client.login(email, password)
+                                                password = ""
+                                                client.register(core.identity.publicIdentity())
+                                                refresh()
+                                                status = "Berhasil masuk."
+                                            }
+                                        },
+                                        filled = true,
+                                        enabled = !working,
+                                    )
+                                    Pill(
+                                        "Daftar",
+                                        {
+                                            action {
+                                                session = client.signup(email, password)
+                                                password = ""
+                                                status =
+                                                    "Akun dibuat. Periksa email untuk konfirmasi."
+                                            }
+                                        },
+                                        enabled = !working,
+                                    )
+                                }
+                            } else {
+                                Text(session!!.userId.toString(), fontSize = 13.sp)
+                                Pill(
+                                    "Keluar",
+                                    {
+                                        policy = null
+                                        sessions.clear()
+                                        session = null
+                                        links = emptyList()
+                                        invitation = ""
+                                        accessRequests = emptyList()
+                                        activeRequestIds = emptyMap()
+                                        status = "Berhasil keluar."
+                                    },
+                                    enabled = !working,
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(18.dp))
+                        SwaraCard {
+                            Text("Penyimpanan rekaman", fontSize = 18.sp, color = Plum)
+                            Text(
+                                if (policy == null) "Tersimpan terenkripsi di perangkat ini."
+                                else "Salinan terenkripsi dengan perangkat terpercaya.",
+                                color = Muted,
+                            )
+                            if (policy != null) Pill("Gunakan penyimpanan lokal", { policy = null })
                         }
                     }
                 }
+                Spacer(Modifier.height(24.dp))
             }
         }
-
-        Text(status)
-        if (policy != null) OutlinedButton(onClick = { policy = null }) { Text("Kembali ke rekaman lokal") }
-        RecorderPanel(core.recorder, captureConfig = CaptureConfig(cloudPolicy = policy))
-
-        // ── Brankas lokal ───────────────────────────────────────────────────
-        Text("Brankas lokal", style = MaterialTheme.typography.titleLarge)
-        recordings.forEach { r ->
-            Text("${r.id} • ${r.capture} • ${r.sync} • Pemulihan ${r.recovery}")
-            if (r.recovery == RecoveryState.DEGRADED && r.capture in setOf(CaptureState.SEALED, CaptureState.INTERRUPTED)) {
-                Button(
-                    enabled = !working && session != null,
-                    onClick = { UploadWorker.enqueue(context, r.id); status = "Antrean unggah dijadwalkan. Ciphertext dan DEK lokal dipertahankan." }
-                ) { Text("Unggah / coba lagi") }
-            } else {
-                // M3: tampilkan status recovery yang informatif
-                when (r.recovery) {
-                    RecoveryState.ENVELOPES_QUEUED -> Text("Kunci siap didistribusikan")
-                    RecoveryState.ENVELOPES_UPLOADED -> Text("Menunggu konfirmasi pemegang")
-                    RecoveryState.HOLDERS_ACKNOWLEDGED -> Text("Pemegang siap — dapat meminta pemulihan")
-                    else -> Text("Rekaman demo tetap lokal.")
+    auditText?.let { text ->
+        AlertDialog(
+            onDismissRequest = {
+                auditText = null
+                pendingLink = null
+            },
+            title = { Text(if (pendingLink == null) "Audit rekaman" else "Cocokkan fingerprint") },
+            text = {
+                SelectionContainer {
+                    Text(text, Modifier.verticalScroll(rememberScrollState()), fontSize = 13.sp)
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = !capture.busy, onClick = { action { status = core.vault.inspect(r.id).message } }) { Text("Periksa") }
-                OutlinedButton(enabled = !capture.busy, onClick = { action { core.playback.prepare(r.id) } }) { Text("Siapkan player") }
-            }
-        }
-        SecurePlaybackPanel(core.playback)
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingLink?.let { link ->
+                            action {
+                                client!!.confirm(link, core.identity)
+                                refresh()
+                                status = "Konfirmasi tersimpan."
+                            }
+                        }
+                        auditText = null
+                        pendingLink = null
+                    }
+                ) {
+                    Text(if (pendingLink == null) "Tutup" else "Sudah cocok")
+                }
+            },
+            dismissButton =
+                if (pendingLink != null) {
+                    {
+                        TextButton(
+                            onClick = {
+                                auditText = null
+                                pendingLink = null
+                            }
+                        ) {
+                            Text("Batal")
+                        }
+                    }
+                } else null,
+        )
     }
 }
 
-private fun recoveryLabel(state: RecoveryState): String = when (state) {
-    RecoveryState.ENVELOPES_QUEUED -> "Kunci siap didistribusikan"
-    RecoveryState.ENVELOPES_UPLOADED -> "Menunggu konfirmasi pemegang"
-    RecoveryState.HOLDERS_ACKNOWLEDGED -> "Pemegang siap — dapat meminta pemulihan"
-    else -> state.name
+@Composable
+private fun EmptyState(title: String, detail: String, icon: String) {
+    Column(
+        Modifier.fillMaxWidth().padding(vertical = 34.dp, horizontal = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SwaraIcon(icon, Modifier.size(30.dp), Muted)
+        Text(title, color = Plum, fontSize = 16.sp)
+        Text(
+            detail,
+            color = Muted,
+            fontSize = 13.sp,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        )
+    }
 }
